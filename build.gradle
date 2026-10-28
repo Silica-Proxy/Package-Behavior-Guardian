@@ -1,0 +1,140 @@
+plugins {
+	id 'java'
+	id 'jacoco'
+	id 'checkstyle'
+	id 'pmd'
+	id 'com.github.spotbugs' version '6.5.11'
+	id 'org.springframework.boot' version '4.1.2'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.github.ben-manes.versions' version '0.64.0'
+	id 'com.github.jk1.dependency-license-report' version '3.1.4'
+}
+
+group = 'com.silicaproxy'
+version = '0.1.0'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'io.micrometer:micrometer-registry-prometheus'
+
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.flywaydb:flyway-database-postgresql'
+	implementation 'org.postgresql:postgresql'
+
+	implementation 'org.jspecify:jspecify:1.0.1'
+
+	// Static bytecode analysis of Maven jars (BSD-3-Clause)
+	implementation 'org.ow2.asm:asm:9.10.1'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+
+	spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0'
+}
+
+spotbugs {
+	toolVersion = '4.10.2'
+	effort = 'max'
+	reportLevel = 'medium'
+	excludeFilter = file('config/spotbugs-exclude.xml')
+	ignoreFailures = false
+}
+spotbugsMain {
+	reports {
+		xml { required = true }
+		html { required = true }
+	}
+}
+spotbugsTest { enabled = false }
+
+checkstyle {
+	toolVersion = '14.3.0'
+	configFile = file('config/checkstyle.xml')
+	ignoreFailures = false
+	showViolations = true
+}
+checkstyleMain {
+	reports {
+		xml { required = true }
+		html { required = true }
+	}
+}
+checkstyleTest { enabled = false }
+
+pmd {
+	toolVersion = '7.25.0'
+	ruleSetFiles = files('config/pmd-ruleset.xml')
+	ignoreFailures = false
+	consoleOutput = false
+}
+pmdMain {
+	reports {
+		xml { required = true }
+		html { required = true }
+	}
+}
+pmdTest { enabled = false }
+
+// License gate: every runtime dependency must carry a license from config/allowed-licenses.json,
+// otherwise `./gradlew check` fails.
+licenseReport {
+	configurations = ['runtimeClasspath']
+	allowedLicensesFile = file('config/allowed-licenses.json')
+	filters = [new com.github.jk1.license.filter.LicenseBundleNormalizer()]
+}
+tasks.named('check') {
+	dependsOn 'checkLicense'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+	finalizedBy jacocoTestReport
+	systemProperty 'spring.profiles.active', 'test'
+	testLogging {
+		events 'started', 'passed', 'skipped', 'failed'
+		exceptionFormat 'full'
+		showStandardStreams = false
+	}
+}
+
+jacocoTestReport {
+	reports {
+		xml.required = true
+		html.required = true
+	}
+}
+
+tasks.named('bootJar') {
+	archiveBaseName = 'packagebehaviorguardian'
+}
+
+def isStableVersion = { String version ->
+	def stableKeyword = ['RELEASE', 'FINAL', 'GA'].any { keyword -> version.toUpperCase().contains(keyword) }
+	def stableRegex = /^[0-9,.v-]+(-r)?$/
+	stableKeyword || (version ==~ stableRegex)
+}
+
+tasks.named('dependencyUpdates') {
+	rejectVersionIf {
+		!isStableVersion(it.candidate.version) && isStableVersion(it.currentVersion)
+	}
+}

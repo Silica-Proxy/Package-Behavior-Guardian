@@ -1,0 +1,19 @@
+Package Behavior Guardian
+Copyright 2026 SilicaProxy Contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The application jar bundles third-party libraries under permissive licenses, checked at build
+time against config/allowed-licenses.json (./gradlew checkLicense), notably:
+  - Spring Boot, Spring Framework, Micrometer, Flyway, HikariCP (Apache-2.0)
+  - Jackson (Apache-2.0)
+  - ASM (BSD-3-Clause)
+  - PostgreSQL JDBC driver (BSD-2-Clause)
+  - JSpecify (Apache-2.0)
+
+The container image additionally installs, as separate executables that are never linked to
+this code:
+  - GuardDog (Datadog, Apache-2.0) and its Python dependencies, including pygit2
+    (GPL-2.0 with linking exception)
+  - malcontent (Chainguard, Apache-2.0), run with --third-party=false: third-party YARA rules
+    under other licenses are not used unless a deployment enables them knowingly.

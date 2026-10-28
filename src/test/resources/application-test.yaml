@@ -1,0 +1,45 @@
+logging:
+  level:
+    com.silicaproxy.packagebehaviorguardian: DEBUG
+
+packagebehaviorguardian:
+  security:
+    enabled: false
+    api-key: "test-api-key"
+    report-api-key: "test-report-api-key"
+
+  intake:
+    allowed-artifact-hosts: ["localhost:*"]
+    allowed-callback-hosts: ["localhost:*"]
+    allow-http-callbacks: true
+    allow-http-artifacts: true
+
+  registries:
+    pypi-url: http://localhost:1
+
+  queue:
+    poll-interval-ms: 200
+    retry-backoff-seconds: 1
+
+  callback:
+    poll-interval-ms: 200
+    initial-backoff-seconds: 1
+
+  analysis:
+    public-base-url: "https://pbg.test"
+
+  scanners:
+    # External tools are not installed on test machines; their parsers are unit-tested on fixtures.
+    guarddog:
+      enabled: false
+    malcontent:
+      enabled: false
+
+  allowlist:
+    - ecosystem: maven
+      name: "com.evil:allowed"
+      rule-id: JVM-001
+      reason: "reviewed: the initializer only probes the OS"
+
+server:
+  port: 0

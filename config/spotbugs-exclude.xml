@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+
+    <!-- Spring components (config/controller/dao/service) store their dependencies via
+         constructor injection (singleton beans) or infrastructure objects with a
+         managed lifecycle (JdbcClient, MeterRegistry, repositories). SpotBugs cannot
+         distinguish these cases from genuine mutability leaks. Same entry as
+         Package-Name-Guardian. -->
+    <Match>
+        <Class name="~com\.silicaproxy\.packagebehaviorguardian\.(config|controller|dao|service)\..*"/>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- @ConfigurationProperties records: bound once at startup by Spring, never mutated. -->
+    <Match>
+        <Class name="~com\.silicaproxy\.packagebehaviorguardian\.properties\..*"/>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- The executable comes from configuration (scanners.*.command), the arguments are fixed
+         words plus paths this service created in its own scratch directory; no shell is involved,
+         so nothing in the analyzed package can inject a command. -->
+    <Match>
+        <Class name="com.silicaproxy.packagebehaviorguardian.service.statics.ProcessRunner"/>
+        <Method name="run"/>
+        <Bug pattern="COMMAND_INJECTION"/>
+    </Match>
+
+</FindBugsFilter>

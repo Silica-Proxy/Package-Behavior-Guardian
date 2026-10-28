@@ -1,0 +1,140 @@
+spring:
+  application:
+    name: packagebehaviorguardian
+
+  web:
+    error:
+      # 400s carry this service's own messages (e.g. "The callback URL host is not allowed: ..."),
+      # never package content: worth returning to the caller.
+      include-message: always
+
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/packagebehaviorguardian}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: ${HIKARI_MAX_POOL_SIZE:20}
+      minimum-idle: ${HIKARI_MIN_IDLE:5}
+      connection-timeout: ${HIKARI_CONNECTION_TIMEOUT:1500}
+      max-lifetime: ${HIKARI_MAX_LIFETIME:1800000}
+
+logging:
+  level:
+    com.silicaproxy.packagebehaviorguardian: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,database
+        liveness:
+          include: livenessState
+      status:
+        order: down,out-of-service,degraded,up,unknown
+
+packagebehaviorguardian:
+  security:
+    # Set to false only for local dev / tests: every endpoint becomes unauthenticated.
+    enabled: "${PACKAGEBEHAVIORGUARDIAN_SECURITY_ENABLED:true}"
+    # Held by SilicaProxy (its services.<name>.api-key): sent on POST /v1/check and sent back on
+    # callbacks. Blank = every check refused.
+    api-key: "${PACKAGEBEHAVIORGUARDIAN_API_KEY:}"
+    # Read-only key of GET /v1/reports, for the people investigating a block. Blank = reports refused.
+    report-api-key: "${PACKAGEBEHAVIORGUARDIAN_REPORT_API_KEY:}"
+
+  intake:
+    # Exact hosts (or host:port) artifacts and registry metadata may be fetched from, on every
+    # redirect hop too. Add your SilicaProxy host if registries are reached through it.
+    allowed-artifact-hosts:
+      - registry.npmjs.org
+      - pypi.org
+      - files.pythonhosted.org
+      - repo1.maven.org
+      - repo.maven.apache.org
+    # SilicaProxy instance(s) allowed as callback targets. Empty = every check is refused (fail closed).
+    allowed-callback-hosts: ${PACKAGEBEHAVIORGUARDIAN_CALLBACK_HOSTS:}
+    # Plain http:// only for SilicaProxy callbacks on a private network; never for artifacts.
+    allow-http-callbacks: false
+    allow-http-artifacts: false
+
+  artifact:
+    max-size-mb: 200
+    max-files-per-version: 60
+    work-dir: ${PACKAGEBEHAVIORGUARDIAN_WORK_DIR:}
+
+  registries:
+    pypi-url: https://pypi.org
+
+  queue:
+    poll-interval-ms: 1000
+    concurrency: 4
+    max-attempts: 3
+    retry-backoff-seconds: 60
+    # Keep below SilicaProxy's pending-ttl-minutes for this service.
+    max-wait-minutes: 30
+
+  callback:
+    poll-interval-ms: 2000
+    max-attempts: 3
+    initial-backoff-seconds: 10
+
+  analysis:
+    # Bump when rules or severities change: older results are re-analyzed on the next check.
+    rule-set-version: "1"
+    public-base-url: ${PACKAGEBEHAVIORGUARDIAN_PUBLIC_BASE_URL:}
+
+  scanners:
+    guarddog:
+      enabled: true
+      command: [guarddog]
+      timeout-seconds: 300
+    malcontent:
+      enabled: true
+      command: [mal]
+      timeout-seconds: 300
+      # Third-party rules have heterogeneous licenses, some forbidding hosted use: opt in knowingly.
+      third-party-rules: false
+    bytecode:
+      enabled: true
+      known-annotation-processor-groups:
+        - org.projectlombok
+        - org.mapstruct
+        - com.google.auto
+        - com.google.dagger
+        - com.google.errorprone
+        - org.immutables
+        - org.hibernate
+        - io.micronaut
+        - io.quarkus
+        - org.springframework
+        - info.picocli
+        - com.querydsl
+        - jakarta
+        - org.checkerframework
+
+  # Expected behaviors, set aside from a package's verdict. Keep them in a versioned file reviewed by
+  # pull request and import it, e.g. SPRING_CONFIG_IMPORT=optional:file:/config/allowlist.yaml:
+  #   packagebehaviorguardian:
+  #     allowlist:
+  #       - ecosystem: npm
+  #         name: esbuild
+  #         version: 0.25.0        # optional: without it, also covers future (possibly compromised) releases
+  #         rule-id: GDG-RISK          # optional: every rule when absent
+  #         detail: install hooks      # optional: only findings whose message/location contain it
+  #         reason: downloads its platform binary at install, reviewed 2026-10-28
+  allowlist: []
+
+server:
+  port: 8101
