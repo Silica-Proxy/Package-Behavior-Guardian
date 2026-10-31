@@ -99,8 +99,17 @@ public class AuditService {
                 job.queuedAt(), null, finishedAt, null, null, null, null, null, analysis.ruleSetVersion(), null, null, null);
     }
 
-    /** Writes the lost leases; a write failure is only logged. */
-    public void recordLeasesLost(List<AnalysisJobRepository.LostLease> lost, AnalysisAudit.Outcome outcome) {
+    /** Writes the attempts lost by jobs claimed again (EXPIRED); a write failure is only logged. */
+    public void recordExpired(List<AnalysisJobRepository.LostLease> lost) {
+        recordLeasesLost(lost, AnalysisAudit.Outcome.EXPIRED);
+    }
+
+    /** Writes the jobs given up with no attempt left (ABANDONED); a write failure is only logged. */
+    public void recordAbandoned(List<AnalysisJobRepository.LostLease> lost) {
+        recordLeasesLost(lost, AnalysisAudit.Outcome.ABANDONED);
+    }
+
+    private void recordLeasesLost(List<AnalysisJobRepository.LostLease> lost, AnalysisAudit.Outcome outcome) {
         Instant now = Instant.now();
         lost.forEach(lease -> record(leaseLost(lease, outcome, now)));
     }

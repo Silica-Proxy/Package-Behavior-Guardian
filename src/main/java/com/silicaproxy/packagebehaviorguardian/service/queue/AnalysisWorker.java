@@ -19,7 +19,6 @@ package com.silicaproxy.packagebehaviorguardian.service.queue;
 
 import com.silicaproxy.packagebehaviorguardian.config.LogSanitizer;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
-import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisAudit;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
 import com.silicaproxy.packagebehaviorguardian.service.audit.AuditService;
@@ -100,9 +99,9 @@ public class AnalysisWorker {
         }
         List<AnalysisJob> jobs;
         try {
-            auditService.recordLeasesLost(jobRepository.failAbandoned(queue.maxAttempts()), AnalysisAudit.Outcome.ABANDONED);
+            auditService.recordAbandoned(jobRepository.failAbandoned(queue.maxAttempts()));
             AnalysisJobRepository.Claim claim = jobRepository.claim(workerId, free, LEASE, queue.maxAttempts());
-            auditService.recordLeasesLost(claim.expiredLeases(), AnalysisAudit.Outcome.EXPIRED);
+            auditService.recordExpired(claim.expiredLeases());
             jobs = claim.jobs();
         } catch (DataAccessException e) {
             LOG.warn("Could not poll the analysis queue: {}", e.getMessage());
@@ -178,8 +177,8 @@ public class AnalysisWorker {
     private void complete(AnalysisJob job, Instant startedAt, AnalysisPipeline.Outcome outcome) {
         Decision decision = verdictPolicy.decide(job.ecosystem(), job.name(), job.version(), outcome.findings());
         if (!jobCompletion.complete(job, workerId, startedAt, outcome, decision)) {
-            LOG.warn("Analysis of job {} finished after its lease was taken over: result discarded (attempt audited as {} or {})",
-                    job.id(), AnalysisAudit.Outcome.EXPIRED, AnalysisAudit.Outcome.ABANDONED);
+            LOG.warn("Analysis of job {} finished after its lease was taken over: result discarded (attempt audited as EXPIRED or ABANDONED)",
+                    job.id());
             return;
         }
         metrics.verdict(job, decision, outcome.findings());

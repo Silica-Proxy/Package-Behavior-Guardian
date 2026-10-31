@@ -21,7 +21,6 @@ import com.silicaproxy.packagebehaviorguardian.BaseIntegrationTest;
 import com.silicaproxy.packagebehaviorguardian.FakeRegistry;
 import com.silicaproxy.packagebehaviorguardian.TestJars;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
-import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisAudit;
 import com.silicaproxy.packagebehaviorguardian.service.audit.AuditService;
 import com.silicaproxy.packagebehaviorguardian.service.queue.JobPurger;
 import java.io.IOException;
@@ -194,7 +193,7 @@ class AuditIntegrationTest extends BaseIntegrationTest {
                 """, id);
 
         // The scheduled worker (max-attempts 3) gives it up too: whichever does it writes the row.
-        auditService.recordLeasesLost(jobRepository.failAbandoned(99), AnalysisAudit.Outcome.ABANDONED);
+        auditService.recordAbandoned(jobRepository.failAbandoned(99));
 
         List<Map<String, Object>> rows = await(() -> jdbcTemplate.queryForList(
                 "SELECT outcome, attempt, worker_id, error, rule_set_version FROM analysis_audit WHERE job_id = ?", id),
