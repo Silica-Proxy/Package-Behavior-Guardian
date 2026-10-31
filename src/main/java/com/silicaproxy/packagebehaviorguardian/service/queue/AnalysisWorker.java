@@ -177,9 +177,10 @@ public class AnalysisWorker {
             return;
         }
         metrics.verdict(job, decision, outcome.findings());
-        LOG.info("Analysis of {}/{}@{} done: {} (score {}, {} finding(s))", job.ecosystem(),
+        Duration total = metrics.total(job, decision);
+        LOG.info("Analysis of {}/{}@{} done: {} (score {}, {} finding(s)), {} ms since queued", job.ecosystem(),
                 LogSanitizer.sanitize(job.name()), LogSanitizer.sanitize(job.version()), decision.verdict(),
-                decision.score(), outcome.findings().size());
+                decision.score(), outcome.findings().size(), total.toMillis());
     }
 
     private void fail(AnalysisJob job, Exception e) {

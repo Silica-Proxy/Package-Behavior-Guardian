@@ -22,6 +22,7 @@ import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobReposit
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
 import com.silicaproxy.packagebehaviorguardian.service.verdict.Decision;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -46,14 +47,41 @@ public class AnalysisMetrics {
 
     /** Records how long the job waited in the queue and starts timing its analysis. */
     public Timer.Sample started(AnalysisJob job) {
-        Timer.builder(Metrics.QUEUE_WAIT_METRIC).register(meterRegistry).record(Duration.between(job.queuedAt(), Instant.now()));
+        Timer.builder(Metrics.QUEUE_WAIT_METRIC).publishPercentileHistogram().register(meterRegistry).record(Duration.between(job.queuedAt(), Instant.now()));
         return Timer.start(meterRegistry);
     }
 
     public void finished(AnalysisJob job, Timer.Sample sample) {
         sample.stop(Timer.builder(Metrics.ANALYSIS_DURATION_METRIC)
                 .tag(Metrics.TAG_ECOSYSTEM, job.ecosystem()).tag(Metrics.TAG_PASS, Metrics.PASS_STATIC)
+                .publishPercentileHistogram()
                 .register(meterRegistry));
+    }
+
+    /** Duration of one stage of the pipeline: resolve, download or scan. */
+    public void stage(String ecosystem, String stage, Duration duration) {
+        Timer.builder(Metrics.ANALYSIS_STAGE_METRIC).tag(Metrics.TAG_ECOSYSTEM, ecosystem).tag(Metrics.TAG_STAGE, stage)
+                .publishPercentileHistogram().register(meterRegistry).record(duration);
+    }
+
+    /** Duration of one scanner run on one file (a scan cache hit shows as a very short one). */
+    public void scan(String ecosystem, String scanner, Duration duration) {
+        Timer.builder(Metrics.SCAN_DURATION_METRIC).tag(Metrics.TAG_ECOSYSTEM, ecosystem).tag(Metrics.TAG_SCANNER, scanner)
+                .publishPercentileHistogram().register(meterRegistry).record(duration);
+    }
+
+    public void artifactBytes(String ecosystem, long totalBytes) {
+        DistributionSummary.builder(Metrics.ANALYSIS_BYTES_METRIC).baseUnit("bytes").tag(Metrics.TAG_ECOSYSTEM, ecosystem)
+                .register(meterRegistry).record(totalBytes);
+    }
+
+    /** End to end latency of a job, from its queuing to its verdict (wait + analysis); returns it for logging. */
+    public Duration total(AnalysisJob job, Decision decision) {
+        Duration total = Duration.between(job.queuedAt(), Instant.now());
+        Timer.builder(Metrics.ANALYSIS_TOTAL_METRIC).tag(Metrics.TAG_ECOSYSTEM, job.ecosystem())
+                .tag(Metrics.TAG_VERDICT, decision.verdict().name()).publishPercentileHistogram()
+                .register(meterRegistry).record(total);
+        return total;
     }
 
     public void verdict(AnalysisJob job, Decision decision, List<Finding> findings) {

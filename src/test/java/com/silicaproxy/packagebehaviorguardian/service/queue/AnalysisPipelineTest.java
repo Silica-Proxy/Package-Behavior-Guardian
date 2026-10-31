@@ -116,7 +116,9 @@ class AnalysisPipelineTest {
                 new PackageBehaviorGuardianProperties.AnalysisProperties("1", null, parallelism, false, 30),
                 defaults.scanners(), defaults.allowlist());
         return new AnalysisPipeline(resolver, downloader, scanners, new ScratchDirectories(properties),
-                new ScanCache(cacheRepository, properties), properties);
+                new ScanCache(cacheRepository, properties), properties,
+                new AnalysisMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                        org.mockito.Mockito.mock(com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository.class)));
     }
 
     private static StaticScanner wholeVersionScanner() {

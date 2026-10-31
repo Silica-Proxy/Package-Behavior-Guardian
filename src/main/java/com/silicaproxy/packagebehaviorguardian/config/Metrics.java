@@ -35,15 +35,25 @@ public final class Metrics {
     public static final String TAG_RULE_ID = "rule_id";
     public static final String TAG_SCANNER = "scanner";
     public static final String TAG_RESULT = "result";
+    public static final String TAG_STAGE = "stage";
+
+    public static final String STAGE_RESOLVE = "resolve";
+    public static final String STAGE_DOWNLOAD = "download";
+    public static final String STAGE_SCAN = "scan";
 
     public static final String PASS_STATIC = "static";
 
     public static final String QUEUE_DEPTH_METRIC = "packagebehaviorguardian.queue.depth";
     public static final String QUEUE_WAIT_METRIC = "packagebehaviorguardian.queue.wait";
     public static final String ANALYSIS_DURATION_METRIC = "packagebehaviorguardian.analysis.duration";
+    public static final String ANALYSIS_STAGE_METRIC = "packagebehaviorguardian.analysis.stage";
+    public static final String ANALYSIS_TOTAL_METRIC = "packagebehaviorguardian.analysis.total";
+    public static final String ANALYSIS_BYTES_METRIC = "packagebehaviorguardian.analysis.artifact.bytes";
+    public static final String SCAN_DURATION_METRIC = "packagebehaviorguardian.scan.duration";
     public static final String ANALYSIS_VERDICT_METRIC = "packagebehaviorguardian.analysis.verdict";
     public static final String ANALYSIS_FAILURES_METRIC = "packagebehaviorguardian.analysis.failures";
     public static final String FINDING_COUNT_METRIC = "packagebehaviorguardian.finding.count";
+    public static final String CALLBACK_DURATION_METRIC = "packagebehaviorguardian.callback.duration";
     public static final String CALLBACK_METRIC = "packagebehaviorguardian.callback";
     public static final String CALLBACK_FAILURES_METRIC = "packagebehaviorguardian.callback.failures";
 

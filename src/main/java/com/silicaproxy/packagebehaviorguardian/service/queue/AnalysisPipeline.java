@@ -17,6 +17,8 @@
 
 package com.silicaproxy.packagebehaviorguardian.service.queue;
 
+import com.silicaproxy.packagebehaviorguardian.config.LogSanitizer;
+import com.silicaproxy.packagebehaviorguardian.config.Metrics;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.model.entity.ArtifactInfo;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
@@ -35,9 +37,13 @@ import com.silicaproxy.packagebehaviorguardian.service.statics.Texts;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.NullMarked;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,6 +56,8 @@ import org.springframework.stereotype.Component;
 @NullMarked
 public class AnalysisPipeline {
 
+    private static final Logger LOG = LoggerFactory.getLogger(AnalysisPipeline.class);
+
     // Disk budget of one job, whatever its number of files (a PyPI version can ship 60 wheels).
     private static final long MAX_TOTAL_BYTES = 1024L * 1024 * 1024;
 
@@ -59,9 +67,12 @@ public class AnalysisPipeline {
     private final ScratchDirectories scratchDirectories;
     private final ScanCache scanCache;
     private final int scanParallelism;
+    private final AnalysisMetrics metrics;
 
     public AnalysisPipeline(ReleaseArtifactResolver resolver, ArtifactDownloader downloader, List<StaticScanner> scanners,
-            ScratchDirectories scratchDirectories, ScanCache scanCache, PackageBehaviorGuardianProperties properties) {
+            ScratchDirectories scratchDirectories, ScanCache scanCache, PackageBehaviorGuardianProperties properties,
+            AnalysisMetrics metrics) {
+        this.metrics = metrics;
         this.resolver = resolver;
         this.downloader = downloader;
         this.scanners = List.copyOf(scanners);
@@ -89,14 +100,41 @@ public class AnalysisPipeline {
     public Outcome run(AnalysisJob job) throws IOException {
         Path workDir = scratchDirectories.create();
         try {
-            List<DownloadedArtifact> downloaded = download(resolver.resolve(job), workDir);
+            Instant start = Instant.now();
+            ReleaseArtifacts release = resolver.resolve(job);
+            Duration resolveTime = stage(job, Metrics.STAGE_RESOLVE, start);
+            start = Instant.now();
+            List<DownloadedArtifact> downloaded = download(release, workDir);
+            Duration downloadTime = stage(job, Metrics.STAGE_DOWNLOAD, start);
+            metrics.artifactBytes(job.ecosystem(), downloaded.stream().mapToLong(DownloadedArtifact::sizeBytes).sum());
+            start = Instant.now();
             List<Finding> findings = downloaded.isEmpty() ? List.of() : scan(job, downloaded, workDir);
+            Duration scanTime = stage(job, Metrics.STAGE_SCAN, start);
+            LOG.info("Timings of {}/{}@{}: resolve {} ms, download {} ms ({} file(s)), scan {} ms", job.ecosystem(),
+                    LogSanitizer.sanitize(job.name()), LogSanitizer.sanitize(job.version()), resolveTime.toMillis(),
+                    downloadTime.toMillis(), downloaded.size(), scanTime.toMillis());
             List<ArtifactInfo> artifacts = downloaded.stream()
                     .map(artifact -> new ArtifactInfo(artifact.url().toString(), artifact.sha256(), artifact.sizeBytes()))
                     .toList();
             return new Outcome(artifacts, findings);
         } finally {
             scratchDirectories.delete(workDir);
+        }
+    }
+
+    private Duration stage(AnalysisJob job, String stage, Instant start) {
+        Duration elapsed = Duration.between(start, Instant.now());
+        metrics.stage(job.ecosystem(), stage, elapsed);
+        return elapsed;
+    }
+
+    private List<Finding> timed(AnalysisJob job, StaticScanner scanner, ParallelScans.Scan<List<Finding>> scan)
+            throws IOException {
+        Instant start = Instant.now();
+        try {
+            return scan.run();
+        } finally {
+            metrics.scan(job.ecosystem(), scanner.name(), Duration.between(start, Instant.now()));
         }
     }
 
@@ -112,11 +150,11 @@ public class AnalysisPipeline {
             }
             if (scanner instanceof FileScanner fileScanner) {
                 for (DownloadedArtifact artifact : downloaded) {
-                    scans.add(() -> scanCache.scan(fileScanner, job.ecosystem(), artifact.path(), artifact.sha256(),
-                            scratchDirectories.createScanDirectory(workDir)));
+                    scans.add(() -> timed(job, scanner, () -> scanCache.scan(fileScanner, job.ecosystem(), artifact.path(),
+                            artifact.sha256(), scratchDirectories.createScanDirectory(workDir))));
                 }
             } else {
-                scans.add(() -> scanner.scan(context));
+                scans.add(() -> timed(job, scanner, () -> scanner.scan(context)));
             }
         }
         List<Finding> findings = new ArrayList<>();

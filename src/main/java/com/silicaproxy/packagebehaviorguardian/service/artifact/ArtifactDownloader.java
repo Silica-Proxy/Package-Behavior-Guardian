@@ -103,7 +103,7 @@ public class ArtifactDownloader {
     }
 
     private Optional<InputStream> get(URI url) throws IOException {
-        URI current = urlPolicy.requireArtifactUrl(url.toString());
+        URI current = upgradeToHttps(urlPolicy.requireArtifactUrl(url.toString()));
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             HttpRequest request = HttpRequest.newBuilder(current)
                     .timeout(TIMEOUT)
@@ -119,7 +119,7 @@ public class ArtifactDownloader {
             if (REDIRECTS.contains(status)) {
                 String location = response.headers().firstValue("Location")
                         .orElseThrow(() -> new IOException("Redirect without Location from " + url));
-                current = urlPolicy.requireArtifactUrl(current.resolve(location).toString());
+                current = upgradeToHttps(urlPolicy.requireArtifactUrl(current.resolve(location).toString()));
             } else if (status == 404 || status == 410) {
                 return Optional.empty();
             } else {
@@ -127,6 +127,18 @@ public class ArtifactDownloader {
             }
         }
         throw new IOException("Too many redirects from " + url);
+    }
+
+    /**
+     * Registries such as Maven Central refuse plain http with a 501, yet callers may hand us
+     * {@code http://} URLs. An http URL on the default port is fetched over https; an explicit
+     * port (local development, tests) is left alone.
+     */
+    static URI upgradeToHttps(URI uri) {
+        if (!"http".equalsIgnoreCase(uri.getScheme()) || uri.getPort() != -1) {
+            return uri;
+        }
+        return URI.create("https" + uri.toString().substring(4));
     }
 
     private HttpResponse<InputStream> send(HttpRequest request) throws IOException {

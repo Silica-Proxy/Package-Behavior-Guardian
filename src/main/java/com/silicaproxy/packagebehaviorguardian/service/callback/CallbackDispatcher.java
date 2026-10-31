@@ -98,7 +98,9 @@ public class CallbackDispatcher {
             return;
         }
         Decision decision = verdictPolicy.decide(job.get().ecosystem(), job.get().name(), job.get().version(), result.get().findings());
+        io.micrometer.core.instrument.Timer.Sample sample = io.micrometer.core.instrument.Timer.start(meterRegistry);
         int status = sender.send(callback.callbackUrl(), new CallbackPayload(decision.verdict(), decision.reason()));
+        sample.stop(meterRegistry.timer(Metrics.CALLBACK_DURATION_METRIC));
         if (status / 100 == 2) {
             callbackRepository.delete(callback.id());
             meterRegistry.counter(Metrics.CALLBACK_METRIC, Metrics.TAG_RESULT, Metrics.RESULT_DELIVERED).increment();
