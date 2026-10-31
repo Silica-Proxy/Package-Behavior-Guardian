@@ -19,6 +19,7 @@ package com.silicaproxy.packagebehaviorguardian.service.verdict;
 
 import com.silicaproxy.packagebehaviorguardian.model.dto.Verdict;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
+import com.silicaproxy.packagebehaviorguardian.model.entity.Severity;
 import java.util.List;
 import org.jspecify.annotations.NullMarked;
 
@@ -29,5 +30,20 @@ public record Decision(Verdict verdict, int score, String reason, List<Finding> 
     public Decision {
         counted = List.copyOf(counted);
         allowlisted = List.copyOf(allowlisted);
+    }
+
+    /**
+     * The rules that made a BLOCKED verdict, distinct and in order: the CRITICAL ones when there are,
+     * else every counted rule that scored (LOW findings never do). Empty for ALLOWED.
+     */
+    public List<String> blockingRules() {
+        if (verdict != Verdict.BLOCKED) {
+            return List.of();
+        }
+        List<String> critical = counted.stream().filter(finding -> finding.severity() == Severity.CRITICAL)
+                .map(Finding::ruleId).distinct().toList();
+        return critical.isEmpty()
+                ? counted.stream().filter(finding -> finding.severity() != Severity.LOW).map(Finding::ruleId).distinct().toList()
+                : critical;
     }
 }

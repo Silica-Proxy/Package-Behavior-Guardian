@@ -17,7 +17,6 @@
 
 package com.silicaproxy.packagebehaviorguardian.model.entity;
 
-import com.silicaproxy.packagebehaviorguardian.model.dto.Verdict;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -26,15 +25,13 @@ import org.jspecify.annotations.NullMarked;
 /**
  * Row of {@code analysis_result}. {@code findings} are the raw scanner findings, before the
  * allowlist is applied: the verdict is recomputed from them on every read, so an allowlist change
- * applies to versions already analyzed. {@code verdict}/{@code score} are the values at analysis
- * time, kept for metrics and history.
+ * applies to versions already analyzed, and so does a change of the verdict scale. The decision
+ * taken at analysis time is kept in {@code analysis_audit}.
  */
 @NullMarked
 public record AnalysisResult(
         UUID jobId,
         String ruleSetVersion,
-        Verdict verdict,
-        int score,
         List<ArtifactInfo> artifacts,
         List<Finding> findings,
         Instant finishedAt) {

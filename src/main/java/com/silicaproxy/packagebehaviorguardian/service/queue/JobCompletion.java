@@ -13,20 +13,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package com.silicaproxy.packagebehaviorguardian.service.queue;
 
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisResultRepository;
+import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisAudit;
+import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisResult;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
+import com.silicaproxy.packagebehaviorguardian.service.audit.AuditService;
+import com.silicaproxy.packagebehaviorguardian.service.verdict.Decision;
+import java.time.Instant;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Stores a result and marks its job DONE atomically: the callback dispatcher only picks up DONE jobs,
- * so it never sees a DONE job without its result. A worker that lost its lease is rolled back.
+ * so it never sees a DONE job without its result. The audit row is written in the same transaction,
+ * under a savepoint (see {@link AuditService#recordWithVerdict}): a failing audit write never costs
+ * the verdict. A worker that lost its lease is rolled back.
  */
 @Component
 @NullMarked
@@ -34,19 +40,28 @@ public class JobCompletion {
 
     private final AnalysisJobRepository jobRepository;
     private final AnalysisResultRepository resultRepository;
+    private final AuditService auditService;
+    private final String ruleSetVersion;
 
-    public JobCompletion(AnalysisJobRepository jobRepository, AnalysisResultRepository resultRepository) {
+    public JobCompletion(AnalysisJobRepository jobRepository, AnalysisResultRepository resultRepository,
+            AuditService auditService, PackageBehaviorGuardianProperties properties) {
         this.jobRepository = jobRepository;
         this.resultRepository = resultRepository;
+        this.auditService = auditService;
+        this.ruleSetVersion = properties.analysis().ruleSetVersion();
     }
 
     /** False (and nothing stored) when {@code workerId} no longer holds the job. */
     @Transactional
-    public boolean complete(AnalysisResult result, String workerId) {
-        if (!jobRepository.markDone(result.jobId(), workerId)) {
+    public boolean complete(AnalysisJob job, String workerId, Instant startedAt, AnalysisPipeline.Outcome outcome,
+            Decision decision) {
+        if (!jobRepository.markDone(job.id(), workerId)) {
             return false;
         }
-        resultRepository.upsert(result);
+        Instant finishedAt = Instant.now();
+        resultRepository.upsert(new AnalysisResult(job.id(), ruleSetVersion, outcome.artifacts(), outcome.findings(), finishedAt));
+        AnalysisAudit audit = auditService.analysisDone(job, workerId, startedAt, finishedAt, outcome, decision);
+        auditService.recordWithVerdict(audit);
         return true;
     }
 }

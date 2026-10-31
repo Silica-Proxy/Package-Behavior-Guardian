@@ -32,6 +32,7 @@ import com.silicaproxy.packagebehaviorguardian.service.verdict.Decision;
 import com.silicaproxy.packagebehaviorguardian.service.verdict.VerdictPolicy;
 import java.net.URI;
 import java.util.Optional;
+import java.util.UUID;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -70,8 +71,11 @@ public class CheckService {
         this.ruleSetVersion = properties.analysis().ruleSetVersion();
     }
 
+    /** The response, and the job behind it (for the audit). */
+    public record Result(CheckResponse response, UUID jobId, String name) { }
+
     @Transactional
-    public CheckResponse check(CheckRequest request) {
+    public Result check(CheckRequest request) {
         try {
             URI artifactUrl = urlPolicy.requireArtifactUrl(request.url());
             urlPolicy.requireCallbackUrl(request.callbackUrl());
@@ -93,8 +97,8 @@ public class CheckService {
 
         if (fresh.isPresent()) {
             Decision decision = verdictPolicy.decide(job.ecosystem(), job.name(), job.version(), fresh.get().findings());
-            return CheckResponse.done(decision.verdict(), decision.reason());
+            return new Result(CheckResponse.done(decision.verdict(), decision.reason()), job.id(), name);
         }
-        return CheckResponse.pending();
+        return new Result(CheckResponse.pending(), job.id(), name);
     }
 }

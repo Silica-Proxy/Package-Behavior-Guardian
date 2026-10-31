@@ -120,12 +120,16 @@ public record PackageBehaviorGuardianProperties(
         // DONE and FAILED jobs neither updated nor checked for this many days are deleted with
         // their results (never a job PENDING or RUNNING, nor one with callbacks waiting). A later
         // check of the version analyzes it again. 0 = keep everything.
-        @DefaultValue("90") int days
+        @DefaultValue("90") int days,
+        // Rows of the analysis_audit and check_audit tables older than this are deleted. They do not
+        // depend on the job: an audit row outlives the purge of its job. 0 = keep everything.
+        @DefaultValue("365") int analysisAuditDays,
+        @DefaultValue("365") int checkAuditDays
     ) {
 
         public RetentionProperties {
-            if (days < 0) {
-                throw new IllegalArgumentException("retention.days must be >= 0");
+            if (days < 0 || analysisAuditDays < 0 || checkAuditDays < 0) {
+                throw new IllegalArgumentException("retention.days, analysis-audit-days and check-audit-days must be >= 0");
             }
         }
     }
@@ -145,8 +149,24 @@ public record PackageBehaviorGuardianProperties(
         @DefaultValue("true") boolean scanCacheEnabled,
         // Cache entries older than this are purged, so that a tool upgrade is eventually seen even
         // without a rule-set bump. Entries of another rule set are purged whatever their age.
-        @DefaultValue("30") int scanCacheMaxAgeDays
-    ) {}
+        @DefaultValue("30") int scanCacheMaxAgeDays,
+        // Verdict scale: each rule counts once at its highest severity (HIGH and MEDIUM weights, LOW
+        // = 0, CRITICAL = block-threshold) and a total >= block-threshold blocks. Applied to stored
+        // findings on every check and report: no rule-set bump needed when they change.
+        @DefaultValue("40") int highWeight,
+        @DefaultValue("20") int mediumWeight,
+        @DefaultValue("60") int blockThreshold
+    ) {
+
+        public AnalysisProperties {
+            if (highWeight < 0 || mediumWeight < 0) {
+                throw new IllegalArgumentException("analysis.high-weight and medium-weight must be >= 0");
+            }
+            if (blockThreshold <= 0) {
+                throw new IllegalArgumentException("analysis.block-threshold must be > 0");
+            }
+        }
+    }
 
     public record ScannerProperties(
         ToolProperties guarddog,

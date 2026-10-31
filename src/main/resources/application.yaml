@@ -108,6 +108,11 @@ packagebehaviorguardian:
     # re-analyzed on its next check. Keep it above SilicaProxy's cache-ttl-minutes, so reports
     # linked from verdicts still cached there stay available. 0 = keep everything.
     days: 90
+    # Audit trail (analysis_audit, check_audit): rows older than this are deleted, whatever became
+    # of their job. 0 = keep everything.
+    analysis-audit-days: ${PACKAGEBEHAVIORGUARDIAN_ANALYSIS_AUDIT_DAYS:365}
+    check-audit-days: ${PACKAGEBEHAVIORGUARDIAN_CHECK_AUDIT_DAYS:365}
+    # Purges run on one instance at a time (ShedLock, table shedlock).
     purge-interval-ms: 3600000
 
   analysis:
@@ -122,6 +127,14 @@ packagebehaviorguardian:
     scan-cache-enabled: true
     # Older entries (and those of any other rule set) are purged: a tool upgrade is seen after this.
     scan-cache-max-age-days: 30
+    # Verdict scale: each rule counts once at its highest severity, LOW = 0, a CRITICAL blocks alone.
+    # A score >= block-threshold blocks with "manual review required". With 40/20/60: a HIGH and
+    # a MEDIUM, two HIGH or three MEDIUM block; a lone HIGH or two MEDIUM do not. Takes effect on the
+    # next check of any version (verdicts are recomputed from stored findings): every instance must
+    # use the same scale, or the same version gets different verdicts depending on who answers.
+    high-weight: ${PACKAGEBEHAVIORGUARDIAN_HIGH_WEIGHT:40}
+    medium-weight: ${PACKAGEBEHAVIORGUARDIAN_MEDIUM_WEIGHT:20}
+    block-threshold: ${PACKAGEBEHAVIORGUARDIAN_BLOCK_THRESHOLD:60}
 
   scanners:
     # The image runs GuardDog and malcontent through scanner-exec, each job under a uid of its own

@@ -62,19 +62,20 @@ class VerdictPolicyTest {
     void highAndMediumFindingsAddUpToTheThreshold() {
         Decision below = policy.decide("npm", "foo", "1.0.0", List.of(finding("JVM-004", Severity.HIGH, "m")));
         Decision atThreshold = policy.decide("npm", "foo", "1.0.0",
-                List.of(finding("JVM-004", Severity.HIGH, "m"), finding("JVM-005", Severity.MEDIUM, "m"),
-                        finding("JVM-006", Severity.MEDIUM, "m")));
+                List.of(finding("JVM-004", Severity.HIGH, "m"), finding("JVM-005", Severity.MEDIUM, "m")));
 
         assertThat(below.verdict()).isEqualTo(Verdict.ALLOWED);
         assertThat(below.score()).isEqualTo(40);
         assertThat(atThreshold.verdict()).isEqualTo(Verdict.BLOCKED);
-        assertThat(atThreshold.reason()).startsWith("BLOCKED: score 80 >= 60 (JVM-004, JVM-005, JVM-006), manual review required");
+        assertThat(atThreshold.reason()).startsWith("BLOCKED: score 60 >= 60 (JVM-004, JVM-005), manual review required");
     }
 
     @Test
     void oneHighAndOneMediumBlock() {
+        // log4j-core 2.26.0 (classpath scan seen as a network call, JVM-003, + its own annotation processor,
+        // JVM-006) is blocked too: a known false positive, released by an allowlist entry.
         Decision maven = policy.decide("maven", "g:a", "1.0", List.of(
-                finding("JVM-004", Severity.HIGH, "m"), finding("JVM-006", Severity.MEDIUM, "m")));
+                finding("JVM-003", Severity.HIGH, "m"), finding("JVM-006", Severity.MEDIUM, "m")));
         Decision malcontent = policy.decide("npm", "foo", "1.0.0", List.of(
                 finding("BEH-072", Severity.HIGH, "m"), finding("BEH-073", Severity.MEDIUM, "m")));
 
@@ -84,17 +85,57 @@ class VerdictPolicyTest {
     }
 
     @Test
-    void aSuspiciousGuardDogPackageBlocks() {
-        Decision decision = policy.decide("pypi", "foo", "1.0.0", List.of(
-                finding("GDG-RISK", Severity.HIGH, "GuardDog rates the package suspicious"),
-                finding("GDG-threat-network-outbound-shady-links", Severity.MEDIUM, "m")));
+    void theBlockingRulesAreTheCriticalOnesElseThoseThatScored() {
+        Decision critical = policy.decide("maven", "g:a", "1.0", List.of(finding("JVM-003", Severity.HIGH, "m"),
+                finding("JVM-001", Severity.CRITICAL, "m"), finding("JVM-001", Severity.CRITICAL, "m2")));
+        Decision scored = policy.decide("maven", "g:a", "1.0", List.of(finding("JVM-003", Severity.HIGH, "m"),
+                finding("JVM-004", Severity.HIGH, "m"), finding("GDG-threat-x", Severity.LOW, "m")));
+        Decision allowed = policy.decide("maven", "g:a", "1.0", List.of(finding("JVM-003", Severity.HIGH, "m")));
 
-        assertThat(decision.verdict()).isEqualTo(Verdict.BLOCKED);
-        assertThat(decision.reason()).startsWith("BLOCKED: score 60 >= 60 (GDG-RISK, GDG-threat-network-outbound-shady-links)");
+        assertThat(critical.blockingRules()).containsExactly("JVM-001");
+        assertThat(scored.blockingRules()).containsExactly("JVM-003", "JVM-004");
+        assertThat(allowed.blockingRules()).isEmpty();
     }
 
     @Test
-    void aLoneMediumOrWeakSignalIsAllowed() {
+    void twoHighBlock() {
+        Decision decision = policy.decide("maven", "g:a", "1.0", List.of(
+                finding("JVM-003", Severity.HIGH, "m"), finding("JVM-004", Severity.HIGH, "m")));
+
+        assertThat(decision.verdict()).isEqualTo(Verdict.BLOCKED);
+        assertThat(decision.score()).isEqualTo(80);
+    }
+
+    @Test
+    void theScaleComesFromTheConfiguration() {
+        VerdictPolicy lenient = policy(TestProperties.withScale(40, 20, 80));
+        Decision decision = lenient.decide("maven", "g:a", "1.0", List.of(
+                finding("JVM-003", Severity.HIGH, "m"), finding("JVM-006", Severity.MEDIUM, "m")));
+
+        assertThat(decision.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(decision.reason()).startsWith("Static pass score 60 < 80");
+
+        Decision critical = policy(TestProperties.withScale(10, 5, 30)).decide("npm", "foo", "1.0.0",
+                List.of(finding("BEH-071", Severity.CRITICAL, "m")));
+        assertThat(critical.score()).isEqualTo(30);
+    }
+
+    @Test
+    void aSuspiciousGuardDogPackageBlocksFromOneRisk() {
+        Decision ratingOnly = policy.decide("pypi", "foo", "1.0.0", List.of(
+                finding("GDG-RISK", Severity.HIGH, "GuardDog rates the package suspicious")));
+        Decision oneRisk = policy.decide("pypi", "foo", "1.0.0", List.of(
+                finding("GDG-RISK", Severity.HIGH, "GuardDog rates the package suspicious"),
+                finding("GDG-threat-network-outbound-shady-links", Severity.MEDIUM, "m")));
+
+        assertThat(ratingOnly.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(oneRisk.verdict()).isEqualTo(Verdict.BLOCKED);
+        assertThat(oneRisk.reason()).startsWith(
+                "BLOCKED: score 60 >= 60 (GDG-RISK, GDG-threat-network-outbound-shady-links)");
+    }
+
+    @Test
+    void oneOrTwoMediumOrWeakSignalsAreAllowed() {
         Decision oneMedium = policy.decide("npm", "foo", "1.0.0", List.of(finding("BEH-073", Severity.MEDIUM, "m")));
         Decision twoMedium = policy.decide("npm", "foo", "1.0.0", List.of(
                 finding("BEH-073", Severity.MEDIUM, "m"), finding("GDG-threat-x", Severity.MEDIUM, "m")));

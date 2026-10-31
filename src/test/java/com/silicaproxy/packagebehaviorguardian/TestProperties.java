@@ -39,6 +39,17 @@ public final class TestProperties {
         return build(List.of(), registries);
     }
 
+    public static PackageBehaviorGuardianProperties withScale(int highWeight, int mediumWeight, int blockThreshold) {
+        PackageBehaviorGuardianProperties d = defaults();
+        PackageBehaviorGuardianProperties.AnalysisProperties a = d.analysis();
+        return new PackageBehaviorGuardianProperties(d.security(), d.intake(), d.artifact(), d.registries(), d.queue(),
+                d.callback(), d.retention(),
+                new PackageBehaviorGuardianProperties.AnalysisProperties(a.ruleSetVersion(), a.publicBaseUrl(),
+                        a.scanParallelism(), a.scanCacheEnabled(), a.scanCacheMaxAgeDays(), highWeight, mediumWeight,
+                        blockThreshold),
+                d.scanners(), d.allowlist());
+    }
+
     private static PackageBehaviorGuardianProperties build(List<AllowlistEntry> allowlist,
             PackageBehaviorGuardianProperties.RegistryProperties registries) {
         return new PackageBehaviorGuardianProperties(
@@ -50,8 +61,8 @@ public final class TestProperties {
                 registries,
                 new PackageBehaviorGuardianProperties.QueueProperties(4, 3, 60, 30, 30),
                 new PackageBehaviorGuardianProperties.CallbackProperties(11, 10, 300),
-                new PackageBehaviorGuardianProperties.RetentionProperties(90),
-                new PackageBehaviorGuardianProperties.AnalysisProperties("1", "https://pbg.internal/", 2, true, 30),
+                new PackageBehaviorGuardianProperties.RetentionProperties(90, 365, 365),
+                new PackageBehaviorGuardianProperties.AnalysisProperties("1", "https://pbg.internal/", 2, true, 30, 40, 20, 60),
                 new PackageBehaviorGuardianProperties.ScannerProperties(
                         new PackageBehaviorGuardianProperties.ToolProperties(true, List.of("guarddog"), 300),
                         new PackageBehaviorGuardianProperties.MalcontentProperties(true, List.of("mal"), 300, false),

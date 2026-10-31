@@ -27,20 +27,25 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The analysis queue. Claiming is a single {@code UPDATE ... WHERE id IN (SELECT ... FOR UPDATE
- * SKIP LOCKED)} statement, so any number of workers (in any number of instances) can poll the same
+ * The analysis queue. Claiming is a single {@code WITH picked AS (SELECT ... FOR UPDATE SKIP LOCKED)
+ * UPDATE ... FROM picked} statement, so any number of workers (in any number of instances) can poll the same
  * table without a broker and without holding a transaction open during the analysis. A RUNNING job
- * whose lease expired (worker crash) becomes claimable again.
+ * whose lease expired (worker crash) becomes claimable again; the claim reports it, so that the lost
+ * attempt is audited.
  */
 @Repository
 @NullMarked
 public class AnalysisJobRepository {
 
     private static final String COLUMNS = "id, ecosystem, name, version, artifact_url, status, attempts, last_error, queued_at";
+    // COLUMNS of analysis_job aliased j, for statements that join it.
+    private static final String QUALIFIED_COLUMNS = "j.id, j.ecosystem, j.name, j.version, j.artifact_url, j.status, "
+            + "j.attempts, j.last_error, j.queued_at";
 
     private final JdbcClient jdbcClient;
 
@@ -110,42 +115,81 @@ public class AnalysisJobRepository {
                 .update();
     }
 
-    public List<AnalysisJob> claim(String workerId, int limit, Duration lease, int maxAttempts) {
-        return jdbcClient.sql("""
-                UPDATE analysis_job
-                SET status = 'RUNNING', locked_by = :workerId, locked_until = now() + make_interval(secs => :leaseSeconds),
-                    attempts = attempts + 1, updated_at = now()
-                WHERE id IN (
-                    SELECT id FROM analysis_job
+    /**
+     * An attempt whose worker vanished: its lease expired before the attempt ended. {@code job} is the
+     * job as the statement left it, {@code attempt} the number of the lost attempt, {@code workerId} the
+     * worker that held it.
+     */
+    public record LostLease(AnalysisJob job, int attempt, @Nullable String workerId) { }
+
+    /** The jobs claimed, and those of them whose previous attempt was lost (lease expired). */
+    public record Claim(List<AnalysisJob> jobs, List<LostLease> expiredLeases) {
+
+        public Claim {
+            jobs = List.copyOf(jobs);
+            expiredLeases = List.copyOf(expiredLeases);
+        }
+    }
+
+    public Claim claim(String workerId, int limit, Duration lease, int maxAttempts) {
+        List<Map<String, Object>> rows = jdbcClient.sql("""
+                WITH picked AS (
+                    SELECT id, status AS previous_status, locked_by AS previous_worker FROM analysis_job
                     WHERE attempts < :maxAttempts
                       AND ((status = 'PENDING' AND next_attempt_at <= now())
                            OR (status = 'RUNNING' AND locked_until < now()))
                     ORDER BY queued_at
                     LIMIT :limit
                     FOR UPDATE SKIP LOCKED)
-                RETURNING
-                """ + COLUMNS)
+                UPDATE analysis_job j
+                SET status = 'RUNNING', locked_by = :workerId, locked_until = now() + make_interval(secs => :leaseSeconds),
+                    attempts = j.attempts + 1, updated_at = now()
+                FROM picked p WHERE j.id = p.id
+                RETURNING p.previous_status, p.previous_worker,
+                """ + QUALIFIED_COLUMNS)
                 .param("workerId", workerId)
                 .param("leaseSeconds", lease.toSeconds())
                 .param("maxAttempts", maxAttempts)
                 .param("limit", limit)
                 .query()
-                .listOfRows()
-                .stream()
-                .map(AnalysisJobRepository::toJob)
+                .listOfRows();
+        List<AnalysisJob> jobs = rows.stream().map(AnalysisJobRepository::toJob).toList();
+        List<LostLease> expired = rows.stream()
+                .filter(row -> JobStatus.RUNNING.name().equals(row.get("previous_status")))
+                .map(row -> {
+                    AnalysisJob job = toJob(row);
+                    return new LostLease(job, job.attempts() - 1, (String) row.get("previous_worker"));
+                })
                 .toList();
+        return new Claim(jobs, expired);
     }
 
-    /** A RUNNING job whose lease expired with no attempt left (its worker kept crashing) is given up. */
-    public int failAbandoned(int maxAttempts) {
+    /**
+     * A RUNNING job whose lease expired with no attempt left (its worker kept crashing) is given up.
+     * Returns the jobs given up, for the caller to audit (ABANDONED): the audit is not written by this
+     * statement, so that a failing audit write never keeps the queue from moving.
+     */
+    public List<LostLease> failAbandoned(int maxAttempts) {
         return jdbcClient.sql("""
-                UPDATE analysis_job
+                WITH abandoned AS (
+                    SELECT id, locked_by FROM analysis_job
+                    WHERE status = 'RUNNING' AND locked_until < now() AND attempts >= :maxAttempts
+                    FOR UPDATE SKIP LOCKED)
+                UPDATE analysis_job j
                 SET status = 'FAILED', locked_by = NULL, locked_until = NULL, updated_at = now(),
-                    last_error = COALESCE(last_error, 'worker lease expired')
-                WHERE status = 'RUNNING' AND locked_until < now() AND attempts >= :maxAttempts
-                """)
+                    last_error = COALESCE(j.last_error, 'worker lease expired')
+                FROM abandoned a WHERE j.id = a.id
+                RETURNING a.locked_by AS previous_worker,
+                """ + QUALIFIED_COLUMNS)
                 .param("maxAttempts", maxAttempts)
-                .update();
+                .query()
+                .listOfRows()
+                .stream()
+                .map(row -> {
+                    AnalysisJob job = toJob(row);
+                    return new LostLease(job, job.attempts(), (String) row.get("previous_worker"));
+                })
+                .toList();
     }
 
     // Every transition of a RUNNING job is fenced on its lease holder: a worker whose lease expired
@@ -194,9 +238,9 @@ public class AnalysisJobRepository {
                 .update();
     }
 
-    /** Back to PENDING after {@code retryDelay}, or FAILED once the attempt budget is spent. */
-    public void markFailed(UUID id, String workerId, String error, boolean retry, Duration retryDelay) {
-        jdbcClient.sql("""
+    /** Back to PENDING after {@code retryDelay}, or FAILED once the attempts are spent. False when this worker lost the job. */
+    public boolean markFailed(UUID id, String workerId, String error, boolean retry, Duration retryDelay) {
+        return jdbcClient.sql("""
                 UPDATE analysis_job
                 SET status = :status, locked_by = NULL, locked_until = NULL, last_error = :error,
                     next_attempt_at = now() + make_interval(secs => :delaySeconds), updated_at = now()
@@ -207,7 +251,7 @@ public class AnalysisJobRepository {
                 .param("status", (retry ? JobStatus.PENDING : JobStatus.FAILED).name())
                 .param("error", error)
                 .param("delaySeconds", retryDelay.toSeconds())
-                .update();
+                .update() == 1;
     }
 
     /**

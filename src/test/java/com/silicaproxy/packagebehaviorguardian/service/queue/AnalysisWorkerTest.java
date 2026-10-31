@@ -32,6 +32,7 @@ import com.silicaproxy.packagebehaviorguardian.TestProperties;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.model.entity.JobStatus;
+import com.silicaproxy.packagebehaviorguardian.service.audit.AuditService;
 import com.silicaproxy.packagebehaviorguardian.service.verdict.VerdictPolicy;
 import java.io.IOException;
 import java.time.Duration;
@@ -49,7 +50,7 @@ class AnalysisWorkerTest {
     private final AnalysisJobRepository jobRepository = mock(AnalysisJobRepository.class);
     private final AnalysisPipeline pipeline = mock(AnalysisPipeline.class);
     private final AnalysisWorker worker = new AnalysisWorker(jobRepository, pipeline, mock(VerdictPolicy.class),
-            mock(JobCompletion.class), TestProperties.defaults(), mock(AnalysisMetrics.class));
+            mock(JobCompletion.class), TestProperties.defaults(), mock(AnalysisMetrics.class), mock(AuditService.class));
     private final AnalysisJob job = new AnalysisJob(UUID.randomUUID(), "npm", "foo", "1.0.0",
             "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz", JobStatus.RUNNING, 1, null, Instant.now());
 
@@ -62,7 +63,7 @@ class AnalysisWorkerTest {
     @SuppressWarnings("unchecked")
     void aJobStuckPastMaxJobMinutesIsInterruptedAndItsLeaseNoLongerRenewed() throws Exception {
         CountDownLatch started = new CountDownLatch(1);
-        when(jobRepository.claim(anyString(), anyInt(), any(Duration.class), anyInt())).thenReturn(List.of(job));
+        when(jobRepository.claim(anyString(), anyInt(), any(Duration.class), anyInt())).thenReturn(new AnalysisJobRepository.Claim(List.of(job), List.of()));
         when(pipeline.run(job)).thenAnswer(invocation -> {
             started.countDown();
             try {

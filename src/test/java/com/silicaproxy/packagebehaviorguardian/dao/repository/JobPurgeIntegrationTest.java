@@ -48,8 +48,8 @@ class JobPurgeIntegrationTest extends BaseIntegrationTest {
                 """, id, "purge-" + id, status, updatedDaysAgo, checkedDaysAgo);
         if ("DONE".equals(status)) {
             jdbcTemplate.update("""
-                    INSERT INTO analysis_result (job_id, rule_set_version, verdict, score, artifacts, findings, finished_at)
-                    VALUES (?, '1', 'ALLOWED', 0, '[]', '[]', now() - make_interval(days => ?))
+                    INSERT INTO analysis_result (job_id, rule_set_version, artifacts, findings, finished_at)
+                    VALUES (?, '1', '[]', '[]', now() - make_interval(days => ?))
                     """, id, updatedDaysAgo);
         }
         return id;

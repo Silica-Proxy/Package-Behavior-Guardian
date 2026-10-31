@@ -57,17 +57,19 @@ class QueueIndexesIntegrationTest extends BaseIntegrationTest {
     @Test
     void claimUsesTheActiveQueueIndexes() {
         String plan = explain("""
-                UPDATE analysis_job
-                SET status = 'RUNNING', locked_by = 'w', locked_until = now() + make_interval(secs => 300),
-                    attempts = attempts + 1, updated_at = now()
-                WHERE id IN (
-                    SELECT id FROM analysis_job
+                WITH picked AS (
+                    SELECT id, status AS previous_status, locked_by AS previous_worker FROM analysis_job
                     WHERE attempts < 3
                       AND ((status = 'PENDING' AND next_attempt_at <= now())
                            OR (status = 'RUNNING' AND locked_until < now()))
                     ORDER BY queued_at
                     LIMIT 10
                     FOR UPDATE SKIP LOCKED)
+                UPDATE analysis_job j
+                SET status = 'RUNNING', locked_by = 'w', locked_until = now() + make_interval(secs => 300),
+                    attempts = j.attempts + 1, updated_at = now()
+                FROM picked p WHERE j.id = p.id
+                RETURNING p.previous_status, j.id
                 """);
         assertThat(plan).containsAnyOf("idx_analysis_job_active_queued", "idx_analysis_job_pending_due");
     }
@@ -75,8 +77,9 @@ class QueueIndexesIntegrationTest extends BaseIntegrationTest {
     @Test
     void failAbandonedUsesTheRunningLeaseIndex() {
         String plan = explain("""
-                UPDATE analysis_job SET status = 'FAILED', locked_by = NULL, locked_until = NULL
+                SELECT id, locked_by FROM analysis_job
                 WHERE status = 'RUNNING' AND locked_until < now() AND attempts >= 3
+                FOR UPDATE SKIP LOCKED
                 """);
         assertThat(plan).contains("idx_analysis_job_running_lease");
     }

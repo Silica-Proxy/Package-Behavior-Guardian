@@ -17,7 +17,6 @@
 
 package com.silicaproxy.packagebehaviorguardian.dao.repository;
 
-import com.silicaproxy.packagebehaviorguardian.model.dto.Verdict;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisResult;
 import com.silicaproxy.packagebehaviorguardian.model.entity.ArtifactInfo;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
@@ -51,18 +50,15 @@ public class AnalysisResultRepository {
     public void upsert(AnalysisResult result) {
         jdbcClient.sql("""
                 INSERT INTO analysis_result
-                    (job_id, rule_set_version, verdict, score, artifacts, findings, finished_at)
-                VALUES (:jobId, :ruleSetVersion, :verdict, :score,
+                    (job_id, rule_set_version, artifacts, findings, finished_at)
+                VALUES (:jobId, :ruleSetVersion,
                         CAST(:artifacts AS jsonb), CAST(:findings AS jsonb), :finishedAt)
                 ON CONFLICT (job_id) DO UPDATE SET
-                    rule_set_version = EXCLUDED.rule_set_version, verdict = EXCLUDED.verdict,
-                    score = EXCLUDED.score,
+                    rule_set_version = EXCLUDED.rule_set_version,
                     artifacts = EXCLUDED.artifacts, findings = EXCLUDED.findings, finished_at = EXCLUDED.finished_at
                 """)
                 .param("jobId", result.jobId())
                 .param("ruleSetVersion", result.ruleSetVersion())
-                .param("verdict", result.verdict().name())
-                .param("score", result.score())
                 .param("artifacts", objectMapper.writeValueAsString(result.artifacts()))
                 .param("findings", objectMapper.writeValueAsString(result.findings()))
                 .param("finishedAt", Timestamp.from(result.finishedAt()))
@@ -71,7 +67,7 @@ public class AnalysisResultRepository {
 
     public Optional<AnalysisResult> findByJobId(UUID jobId) {
         return jdbcClient.sql("""
-                SELECT job_id, rule_set_version, verdict, score,
+                SELECT job_id, rule_set_version,
                        artifacts::text AS artifacts, findings::text AS findings, finished_at
                 FROM analysis_result WHERE job_id = :jobId
                 """)
@@ -87,8 +83,6 @@ public class AnalysisResultRepository {
         return new AnalysisResult(
                 (UUID) row.get("job_id"),
                 (String) row.get("rule_set_version"),
-                Verdict.valueOf((String) row.get("verdict")),
-                ((Number) row.get("score")).intValue(),
                 objectMapper.readValue((String) row.get("artifacts"), ARTIFACTS),
                 objectMapper.readValue((String) row.get("findings"), FINDINGS),
                 ((Timestamp) row.get("finished_at")).toInstant());

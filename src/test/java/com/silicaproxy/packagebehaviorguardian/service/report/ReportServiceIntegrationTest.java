@@ -47,8 +47,8 @@ class ReportServiceIntegrationTest extends BaseIntegrationTest {
                 VALUES (?, 'npm', ?, '1.0.0', 'http://localhost/x.tgz', ?, 1, 'worker-a', now() + interval '10 minutes')
                 """, id, name, status);
         jdbcTemplate.update("""
-                INSERT INTO analysis_result (job_id, rule_set_version, verdict, score, artifacts, findings, finished_at)
-                VALUES (?, ?, 'ALLOWED', 0, '[]'::jsonb, '[]'::jsonb, now())
+                INSERT INTO analysis_result (job_id, rule_set_version, artifacts, findings, finished_at)
+                VALUES (?, ?, '[]'::jsonb, '[]'::jsonb, now())
                 """, id, ruleSetVersionOfResult);
         return name;
     }

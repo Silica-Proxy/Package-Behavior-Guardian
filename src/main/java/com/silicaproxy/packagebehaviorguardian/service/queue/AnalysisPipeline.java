@@ -42,6 +42,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -81,7 +82,13 @@ public class AnalysisPipeline {
         this.scanParallelism = Math.max(1, properties.analysis().scanParallelism());
     }
 
-    public record Outcome(List<ArtifactInfo> artifacts, List<Finding> findings) {
+    /** Durations of the pipeline stages, in milliseconds; null when the stage did not run to its end. */
+    public record StageTimings(@Nullable Long resolveMs, @Nullable Long downloadMs, @Nullable Long scanMs) {
+
+        public static final StageTimings UNKNOWN = new StageTimings(null, null, null);
+    }
+
+    public record Outcome(List<ArtifactInfo> artifacts, List<Finding> findings, StageTimings timings) {
 
         // The package prevents its own analysis (see HostileArtifactException): BLOCKED, not fail-open.
         static final String ANALYSIS_IMPOSSIBLE_RULE = "PBG-001";
@@ -93,7 +100,7 @@ public class AnalysisPipeline {
 
         static Outcome analysisImpossible(HostileArtifactException cause) {
             return new Outcome(List.of(), List.of(new Finding(ANALYSIS_IMPOSSIBLE_RULE, Severity.CRITICAL, "pipeline",
-                    Texts.clip("Analysis impossible: " + cause.getMessage()), null)));
+                    Texts.clip("Analysis impossible: " + cause.getMessage()), null)), StageTimings.UNKNOWN);
         }
     }
 
@@ -116,7 +123,8 @@ public class AnalysisPipeline {
             List<ArtifactInfo> artifacts = downloaded.stream()
                     .map(artifact -> new ArtifactInfo(artifact.url().toString(), artifact.sha256(), artifact.sizeBytes()))
                     .toList();
-            return new Outcome(artifacts, findings);
+            return new Outcome(artifacts, findings,
+                    new StageTimings(resolveTime.toMillis(), downloadTime.toMillis(), scanTime.toMillis()));
         } finally {
             scratchDirectories.delete(workDir);
         }

@@ -145,7 +145,7 @@ class ScanCacheIntegrationTest extends BaseIntegrationTest {
         PackageBehaviorGuardianProperties defaults = TestProperties.defaults();
         return new PackageBehaviorGuardianProperties(defaults.security(), defaults.intake(), defaults.artifact(),
                 defaults.registries(), defaults.queue(), defaults.callback(), defaults.retention(),
-                new PackageBehaviorGuardianProperties.AnalysisProperties(ruleSetVersion, null, 2, cacheEnabled, 30),
+                new PackageBehaviorGuardianProperties.AnalysisProperties(ruleSetVersion, null, 2, cacheEnabled, 30, 40, 20, 60),
                 defaults.scanners(), defaults.allowlist());
     }
 

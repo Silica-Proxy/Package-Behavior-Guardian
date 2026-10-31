@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -79,6 +80,7 @@ public class ScanCache {
     }
 
     @Scheduled(initialDelay = 1, fixedDelay = 360, timeUnit = TimeUnit.MINUTES)
+    @SchedulerLock(name = "pbg-scan-cache-purge", lockAtLeastFor = "PT1M")
     public void purge() {
         try {
             int purged = repository.purge(properties.ruleSetVersion(),

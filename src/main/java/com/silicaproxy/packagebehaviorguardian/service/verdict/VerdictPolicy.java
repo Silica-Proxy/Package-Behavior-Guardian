@@ -35,12 +35,13 @@ import org.springframework.stereotype.Component;
 
 /**
  * Findings to verdict. Findings covered by the configured allowlist are set aside first. Then one
- * CRITICAL blocks; otherwise HIGH (40) and MEDIUM (20) findings add up -- each rule once, at its
+ * CRITICAL blocks; otherwise HIGH and MEDIUM findings add up (weights {@code analysis.high-weight},
+ * {@code medium-weight}, default 40 and 20) -- each rule once, at its
  * highest severity, so that one behavior repeated in ten methods does not outweigh two distinct
- * behaviors -- and a score of 60 or more blocks with "manual review required". So a HIGH signal
- * corroborated by another rule (HIGH + MEDIUM, a GuardDog {@code suspicious} rating and one of its
- * risks, two HIGH) or three distinct MEDIUM rules block, while a lone HIGH, one or two MEDIUM and
- * LOW findings (report only) do not. Two verdicts only:
+ * behaviors -- and a score of {@code analysis.block-threshold} (default 60) or more blocks with
+ * "manual review required". So a HIGH signal corroborated by another rule (HIGH + MEDIUM, a GuardDog
+ * {@code suspicious} rating and one of its risks, two HIGH) or three distinct MEDIUM rules block,
+ * while a lone HIGH, one or two MEDIUM and LOW findings (report only) do not. Two verdicts only:
  * the grey zone is a BLOCKED with the report link, released through a SilicaProxy GitOps policy or
  * an allowlist entry here. The reason quotes the rule ID and the description of the first
  * CRITICAL finding -- this service's or the scanner's rule description, clipped and stripped of
@@ -50,19 +51,22 @@ import org.springframework.stereotype.Component;
 @NullMarked
 public class VerdictPolicy {
 
-    static final int HIGH_WEIGHT = 40;
-    static final int MEDIUM_WEIGHT = 20;
-    static final int BLOCK_THRESHOLD = 60;
     private static final String GUARDDOG_RULE_PREFIX = "GDG-";
 
     private final List<AllowlistEntry> allowlist;
     private final String ruleSetVersion;
     private final ReportLinks reportLinks;
+    private final int highWeight;
+    private final int mediumWeight;
+    private final int blockThreshold;
 
     public VerdictPolicy(PackageBehaviorGuardianProperties properties, ReportLinks reportLinks) {
         this.allowlist = List.copyOf(properties.allowlist());
         this.ruleSetVersion = properties.analysis().ruleSetVersion();
         this.reportLinks = reportLinks;
+        this.highWeight = properties.analysis().highWeight();
+        this.mediumWeight = properties.analysis().mediumWeight();
+        this.blockThreshold = properties.analysis().blockThreshold();
     }
 
     public Decision decide(String ecosystem, String name, String version, List<Finding> findings) {
@@ -87,15 +91,15 @@ public class VerdictPolicy {
             return new Decision(Verdict.BLOCKED, score,
                     "BLOCKED by " + finding.ruleId() + " (" + Texts.clip(finding.message()) + ")" + reportSuffix, counted, allowlisted);
         }
-        if (score >= BLOCK_THRESHOLD) {
+        if (score >= blockThreshold) {
             String rules = String.join(", ", counted.stream().map(Finding::ruleId).distinct().toList());
             return new Decision(Verdict.BLOCKED, score,
-                    "BLOCKED: score " + score + " >= " + BLOCK_THRESHOLD + " (" + rules + "), manual review required"
+                    "BLOCKED: score " + score + " >= " + blockThreshold + " (" + rules + "), manual review required"
                             + reportSuffix, counted, allowlisted);
         }
         String reason = counted.isEmpty()
                 ? "No suspicious behavior found by the static pass (rule set " + ruleSetVersion + ")"
-                : "Static pass score " + score + " < " + BLOCK_THRESHOLD + " (rule set " + ruleSetVersion + ")";
+                : "Static pass score " + score + " < " + blockThreshold + " (rule set " + ruleSetVersion + ")";
         return new Decision(Verdict.ALLOWED, score, reason + reportSuffix, counted, allowlisted);
     }
 
@@ -107,13 +111,13 @@ public class VerdictPolicy {
         return finding.ruleId().startsWith(GUARDDOG_RULE_PREFIX) && !isGuardDogRating(finding);
     }
 
-    private static int score(List<Finding> counted) {
+    private int score(List<Finding> counted) {
         Map<String, Integer> weightByRule = new HashMap<>();
         for (Finding finding : counted) {
             int weight = switch (finding.severity()) {
-                case CRITICAL -> BLOCK_THRESHOLD;
-                case HIGH -> HIGH_WEIGHT;
-                case MEDIUM -> MEDIUM_WEIGHT;
+                case CRITICAL -> blockThreshold;
+                case HIGH -> highWeight;
+                case MEDIUM -> mediumWeight;
                 case LOW -> 0;
             };
             weightByRule.merge(finding.ruleId(), weight, Math::max);

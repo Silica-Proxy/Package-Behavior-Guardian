@@ -113,7 +113,7 @@ class AnalysisPipelineTest {
         PackageBehaviorGuardianProperties properties = new PackageBehaviorGuardianProperties(defaults.security(),
                 defaults.intake(), new PackageBehaviorGuardianProperties.ArtifactProperties(200, 60, scratch),
                 defaults.registries(), defaults.queue(), defaults.callback(), defaults.retention(),
-                new PackageBehaviorGuardianProperties.AnalysisProperties("1", null, parallelism, false, 30),
+                new PackageBehaviorGuardianProperties.AnalysisProperties("1", null, parallelism, false, 30, 40, 20, 60),
                 defaults.scanners(), defaults.allowlist());
         return new AnalysisPipeline(resolver, downloader, scanners, new ScratchDirectories(properties),
                 new ScanCache(cacheRepository, properties), properties,

@@ -19,9 +19,10 @@ package com.silicaproxy.packagebehaviorguardian.service.queue;
 
 import com.silicaproxy.packagebehaviorguardian.config.LogSanitizer;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
+import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisAudit;
 import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
-import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisResult;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
+import com.silicaproxy.packagebehaviorguardian.service.audit.AuditService;
 import com.silicaproxy.packagebehaviorguardian.service.statics.HostileArtifactException;
 import com.silicaproxy.packagebehaviorguardian.service.statics.Texts;
 import com.silicaproxy.packagebehaviorguardian.service.verdict.Decision;
@@ -72,19 +73,22 @@ public class AnalysisWorker {
     private final JobCompletion jobCompletion;
     private final PackageBehaviorGuardianProperties properties;
     private final AnalysisMetrics metrics;
+    private final AuditService auditService;
     private final String workerId = "worker-" + UUID.randomUUID();
     private final Map<UUID, RunningJob> inFlight = new ConcurrentHashMap<>();
     private volatile boolean stopping;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     public AnalysisWorker(AnalysisJobRepository jobRepository, AnalysisPipeline pipeline, VerdictPolicy verdictPolicy,
-            JobCompletion jobCompletion, PackageBehaviorGuardianProperties properties, AnalysisMetrics metrics) {
+            JobCompletion jobCompletion, PackageBehaviorGuardianProperties properties, AnalysisMetrics metrics,
+            AuditService auditService) {
         this.jobRepository = jobRepository;
         this.pipeline = pipeline;
         this.verdictPolicy = verdictPolicy;
         this.jobCompletion = jobCompletion;
         this.properties = properties;
         this.metrics = metrics;
+        this.auditService = auditService;
     }
 
     @Scheduled(fixedDelayString = "${packagebehaviorguardian.queue.poll-interval-ms:1000}")
@@ -96,8 +100,10 @@ public class AnalysisWorker {
         }
         List<AnalysisJob> jobs;
         try {
-            jobRepository.failAbandoned(queue.maxAttempts());
-            jobs = jobRepository.claim(workerId, free, LEASE, queue.maxAttempts());
+            auditService.recordLeasesLost(jobRepository.failAbandoned(queue.maxAttempts()), AnalysisAudit.Outcome.ABANDONED);
+            AnalysisJobRepository.Claim claim = jobRepository.claim(workerId, free, LEASE, queue.maxAttempts());
+            auditService.recordLeasesLost(claim.expiredLeases(), AnalysisAudit.Outcome.EXPIRED);
+            jobs = claim.jobs();
         } catch (DataAccessException e) {
             LOG.warn("Could not poll the analysis queue: {}", e.getMessage());
             return;
@@ -153,27 +159,27 @@ public class AnalysisWorker {
 
     void process(AnalysisJob job) {
         Timer.Sample sample = metrics.started(job);
+        Instant startedAt = Instant.now();
         try {
-            complete(job, pipeline.run(job));
+            complete(job, startedAt, pipeline.run(job));
         } catch (HostileArtifactException e) {
             if (e.mayBeTransient() && job.attempts() < properties.queue().maxAttempts()) {
-                fail(job, e);
+                fail(job, startedAt, e);
             } else {
-                complete(job, AnalysisPipeline.Outcome.analysisImpossible(e));
+                complete(job, startedAt, AnalysisPipeline.Outcome.analysisImpossible(e));
             }
         } catch (IOException | RuntimeException e) {
-            fail(job, e);
+            fail(job, startedAt, e);
         } finally {
             metrics.finished(job, sample);
         }
     }
 
-    private void complete(AnalysisJob job, AnalysisPipeline.Outcome outcome) {
+    private void complete(AnalysisJob job, Instant startedAt, AnalysisPipeline.Outcome outcome) {
         Decision decision = verdictPolicy.decide(job.ecosystem(), job.name(), job.version(), outcome.findings());
-        boolean stored = jobCompletion.complete(new AnalysisResult(job.id(), properties.analysis().ruleSetVersion(),
-                decision.verdict(), decision.score(), outcome.artifacts(), outcome.findings(), Instant.now()), workerId);
-        if (!stored) {
-            LOG.warn("Analysis of job {} finished after its lease was taken over: result discarded", job.id());
+        if (!jobCompletion.complete(job, workerId, startedAt, outcome, decision)) {
+            LOG.warn("Analysis of job {} finished after its lease was taken over: result discarded (attempt audited as {} or {})",
+                    job.id(), AnalysisAudit.Outcome.EXPIRED, AnalysisAudit.Outcome.ABANDONED);
             return;
         }
         metrics.verdict(job, decision, outcome.findings());
@@ -183,7 +189,7 @@ public class AnalysisWorker {
                 decision.score(), outcome.findings().size(), total.toMillis());
     }
 
-    private void fail(AnalysisJob job, Exception e) {
+    private void fail(AnalysisJob job, Instant startedAt, Exception e) {
         if (stopping) {
             return; // interrupted by the shutdown: shutdown() hands the job back without spending an attempt
         }
@@ -201,8 +207,10 @@ public class AnalysisWorker {
                 LogSanitizer.sanitize(job.version()), job.attempts(), queue.maxAttempts(), retry ? ", will retry" : ", giving up",
                 LogSanitizer.sanitize(bounded));
         try {
-            jobRepository.markFailed(job.id(), workerId, bounded, retry,
-                    Duration.ofSeconds((long) queue.retryBackoffSeconds() * job.attempts()));
+            if (jobRepository.markFailed(job.id(), workerId, bounded, retry,
+                    Duration.ofSeconds((long) queue.retryBackoffSeconds() * job.attempts()))) {
+                auditService.record(auditService.analysisFailed(job, workerId, startedAt, Instant.now(), bounded, retry));
+            }
         } catch (DataAccessException dbError) {
             // The lease expires and the job is claimed again: nothing is lost.
             LOG.warn("Could not record the failure of job {}: {}", job.id(), dbError.getMessage());

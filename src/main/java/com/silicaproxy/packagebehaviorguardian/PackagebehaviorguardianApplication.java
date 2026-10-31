@@ -27,7 +27,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * Spring Boot entry point of packagebehaviorguardian. {@code @EnableScheduling} drives the two
  * pollers that make the service asynchronous: {@code AnalysisWorker} (claims queued analysis jobs)
  * and {@code CallbackDispatcher} (delivers verdicts back to SilicaProxy), plus {@code JobPurger}
- * (deletes old finished jobs).
+ * (deletes old finished jobs and audit rows, on one instance at a time: see {@code SchedulerLockConfig}).
  */
 @SpringBootApplication
 @EnableConfigurationProperties(PackageBehaviorGuardianProperties.class)
