@@ -41,6 +41,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.ModuleVisitor;
 import org.objectweb.asm.Opcodes;
 
 /**
@@ -54,6 +55,7 @@ import org.objectweb.asm.Opcodes;
 public final class JarInspector {
 
     private static final String PROCESSOR_SERVICE = "META-INF/services/javax.annotation.processing.Processor";
+    private static final String PROCESSOR_INTERFACE = "javax/annotation/processing/Processor";
     private static final String PLUGIN_DESCRIPTOR = "META-INF/maven/plugin.xml";
     private static final Pattern IMPLEMENTATION = Pattern.compile("<implementation>([^<]+)</implementation>");
     private static final List<String> NATIVE_SUFFIXES = List.of(".so", ".dll", ".dylib", ".jnilib");
@@ -84,7 +86,7 @@ public final class JarInspector {
                     continue;
                 }
                 if (lower.endsWith(".class")) {
-                    classes.add(readClass(read(zip, entry)));
+                    classes.add(readClass(read(zip, entry), processors));
                 } else if (PROCESSOR_SERVICE.equals(name)) {
                     processors.addAll(serviceEntries(new String(read(zip, entry), StandardCharsets.UTF_8)));
                 } else if (PLUGIN_DESCRIPTOR.equals(name)) {
@@ -131,9 +133,11 @@ public final class JarInspector {
         return names;
     }
 
-    private static ClassFacts readClass(byte[] bytes) throws IOException {
+    // A module-info's `provides javax.annotation.processing.Processor with ...` registers processors
+    // as the services file does (javac reads it on the module path): they are added to `processors`.
+    private static ClassFacts readClass(byte[] bytes, Set<String> processors) throws IOException {
         try {
-            FactsVisitor visitor = new FactsVisitor();
+            FactsVisitor visitor = new FactsVisitor(processors);
             new ClassReader(bytes).accept(visitor, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             return visitor.toFacts();
         } catch (RuntimeException e) {
@@ -148,9 +152,11 @@ public final class JarInspector {
         private @Nullable String superName;
         private List<String> interfaces = List.of();
         private final List<MethodCollector> methods = new ArrayList<>();
+        private final Set<String> processors;
 
-        FactsVisitor() {
+        FactsVisitor(Set<String> processors) {
             super(Opcodes.ASM9);
+            this.processors = processors;
         }
 
         @Override
@@ -159,6 +165,18 @@ public final class JarInspector {
             this.name = className;
             this.superName = superClassName;
             this.interfaces = interfaceNames == null ? List.of() : List.of(interfaceNames);
+        }
+
+        @Override
+        public ModuleVisitor visitModule(String moduleName, int access, @Nullable String version) {
+            return new ModuleVisitor(Opcodes.ASM9) {
+                @Override
+                public void visitProvide(String service, String... providers) {
+                    if (PROCESSOR_INTERFACE.equals(service)) {
+                        processors.addAll(List.of(providers));
+                    }
+                }
+            };
         }
 
         @Override

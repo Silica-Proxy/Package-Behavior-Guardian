@@ -28,7 +28,8 @@ import org.jspecify.annotations.NullMarked;
  * groupId:artifactId}. {@code url} is the artifact the client asked for; {@code callbackUrl} is
  * where the verdict must be POSTed. Both URLs are checked against host allowlists before use.
  * {@code packageName} and {@code version} reject control characters and whitespace (no registry
- * accepts them), which also keeps them from forging log lines.
+ * accepts them), which also keeps them from forging log lines. The per-ecosystem charsets, and the
+ * binding of {@code url} to (name, version), are checked by {@code PackageIdentityPolicy}.
  */
 @NullMarked
 public record CheckRequest(

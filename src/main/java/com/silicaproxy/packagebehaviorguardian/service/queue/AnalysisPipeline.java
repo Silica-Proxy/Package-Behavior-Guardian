@@ -21,11 +21,14 @@ import com.silicaproxy.packagebehaviorguardian.model.entity.AnalysisJob;
 import com.silicaproxy.packagebehaviorguardian.model.entity.ArtifactInfo;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
 import com.silicaproxy.packagebehaviorguardian.model.entity.Severity;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
 import com.silicaproxy.packagebehaviorguardian.service.artifact.ArtifactDownloader;
 import com.silicaproxy.packagebehaviorguardian.service.artifact.DownloadedArtifact;
 import com.silicaproxy.packagebehaviorguardian.service.artifact.ReleaseArtifactResolver;
 import com.silicaproxy.packagebehaviorguardian.service.artifact.ReleaseArtifactResolver.ReleaseArtifacts;
+import com.silicaproxy.packagebehaviorguardian.service.statics.FileScanner;
 import com.silicaproxy.packagebehaviorguardian.service.statics.HostileArtifactException;
+import com.silicaproxy.packagebehaviorguardian.service.statics.ScanCache;
 import com.silicaproxy.packagebehaviorguardian.service.statics.ScanContext;
 import com.silicaproxy.packagebehaviorguardian.service.statics.StaticScanner;
 import com.silicaproxy.packagebehaviorguardian.service.statics.Texts;
@@ -40,7 +43,8 @@ import org.springframework.stereotype.Component;
 /**
  * The static pass for one job: resolve every file of the version, download them into a scratch
  * directory, then run each enabled scanner that supports the ecosystem. Nothing from the package
- * is executed.
+ * is executed. A {@link FileScanner} runs once per file, through the {@link ScanCache}, and these
+ * scans run {@code analysis.scan-parallelism} at a time (see {@link ParallelScans}).
  */
 @Component
 @NullMarked
@@ -53,13 +57,17 @@ public class AnalysisPipeline {
     private final ArtifactDownloader downloader;
     private final List<StaticScanner> scanners;
     private final ScratchDirectories scratchDirectories;
+    private final ScanCache scanCache;
+    private final int scanParallelism;
 
     public AnalysisPipeline(ReleaseArtifactResolver resolver, ArtifactDownloader downloader, List<StaticScanner> scanners,
-            ScratchDirectories scratchDirectories) {
+            ScratchDirectories scratchDirectories, ScanCache scanCache, PackageBehaviorGuardianProperties properties) {
         this.resolver = resolver;
         this.downloader = downloader;
         this.scanners = List.copyOf(scanners);
         this.scratchDirectories = scratchDirectories;
+        this.scanCache = scanCache;
+        this.scanParallelism = Math.max(1, properties.analysis().scanParallelism());
     }
 
     public record Outcome(List<ArtifactInfo> artifacts, List<Finding> findings) {
@@ -81,17 +89,8 @@ public class AnalysisPipeline {
     public Outcome run(AnalysisJob job) throws IOException {
         Path workDir = scratchDirectories.create();
         try {
-            List<DownloadedArtifact> downloaded = download(downloader, resolver.resolve(job), workDir);
-            List<Finding> findings = new ArrayList<>();
-            if (!downloaded.isEmpty()) {
-                ScanContext context = new ScanContext(job.ecosystem(), job.name(), job.version(),
-                        downloaded.stream().map(DownloadedArtifact::path).toList(), workDir);
-                for (StaticScanner scanner : scanners) {
-                    if (scanner.enabled() && scanner.supports(job.ecosystem())) {
-                        findings.addAll(scanner.scan(context));
-                    }
-                }
-            }
+            List<DownloadedArtifact> downloaded = download(resolver.resolve(job), workDir);
+            List<Finding> findings = downloaded.isEmpty() ? List.of() : scan(job, downloaded, workDir);
             List<ArtifactInfo> artifacts = downloaded.stream()
                     .map(artifact -> new ArtifactInfo(artifact.url().toString(), artifact.sha256(), artifact.sizeBytes()))
                     .toList();
@@ -101,8 +100,34 @@ public class AnalysisPipeline {
         }
     }
 
-    private static List<DownloadedArtifact> download(ArtifactDownloader downloader, ReleaseArtifacts release, Path workDir)
-            throws IOException {
+    // One task per (file scanner, file), one per other scanner, in scanner order: the findings come
+    // out in the same order as a sequential run.
+    private List<Finding> scan(AnalysisJob job, List<DownloadedArtifact> downloaded, Path workDir) throws IOException {
+        ScanContext context = new ScanContext(job.ecosystem(), job.name(), job.version(),
+                downloaded.stream().map(DownloadedArtifact::path).toList(), workDir);
+        List<ParallelScans.Scan<List<Finding>>> scans = new ArrayList<>();
+        for (StaticScanner scanner : scanners) {
+            if (!scanner.enabled() || !scanner.supports(job.ecosystem())) {
+                continue;
+            }
+            if (scanner instanceof FileScanner fileScanner) {
+                for (DownloadedArtifact artifact : downloaded) {
+                    scans.add(() -> scanCache.scan(fileScanner, job.ecosystem(), artifact.path(), artifact.sha256(),
+                            scratchDirectories.createScanDirectory(workDir)));
+                }
+            } else {
+                scans.add(() -> scanner.scan(context));
+            }
+        }
+        List<Finding> findings = new ArrayList<>();
+        // Under scanner isolation every process of a job runs as the job's uid, and scanner-exec kills
+        // all of that uid's processes when one starts and ends: the job's scans must not overlap.
+        int parallelism = scratchDirectories.isolated() ? 1 : scanParallelism;
+        ParallelScans.runAll(scans, parallelism).forEach(findings::addAll);
+        return findings;
+    }
+
+    private List<DownloadedArtifact> download(ReleaseArtifacts release, Path workDir) throws IOException {
         List<DownloadedArtifact> downloaded = new ArrayList<>();
         long total = 0;
         int index = 0;
@@ -110,6 +135,7 @@ public class AnalysisPipeline {
             DownloadedArtifact artifact = downloader.download(url, workDir.resolve(index++ + "-" + fileName(url)))
                     .orElseThrow(() -> new IOException("Not found: " + url));
             downloaded.add(artifact);
+            scratchDirectories.shareWithScanner(workDir, artifact.path());
             total += artifact.sizeBytes();
             if (total > MAX_TOTAL_BYTES) {
                 throw new HostileArtifactException("Version larger than " + MAX_TOTAL_BYTES / (1024 * 1024) + " MB in total", false);

@@ -1,0 +1,4 @@
+# GuardDog, installed in the image's virtualenv (see Dockerfile, stage guarddog-builder).
+# Locked with all its transitive dependencies and their hashes in guarddog-requirements.txt; to
+# regenerate the locks, see guarddog-build-requirements.in.
+guarddog==3.2.0

@@ -31,7 +31,16 @@ import java.util.Locale;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.stereotype.Component;
 
-/** In-process ASM analysis of Maven jars (JVM-001 to JVM-007). Needs no external tool. */
+/**
+ * In-process ASM analysis of Maven jars (JVM-001 to JVM-007). Needs no external tool.
+ *
+ * <p>Known blind spot: reflection and method handles. {@link CallGraph} follows direct calls,
+ * lambdas, method references and overrides in the jar, but a call through {@code Method.invoke},
+ * {@code Constructor.newInstance} or a {@code MethodHandle} has a run-time target and ends the
+ * walk. JVM-007 only catches two shapes of it (process-execution names as constants, names decoded
+ * by Base64 / XOR); names assembled any other way, or a jar class invoked reflectively, go unseen
+ * until the dynamic pass.
+ */
 @Component
 @NullMarked
 public class BytecodeScanner implements StaticScanner {

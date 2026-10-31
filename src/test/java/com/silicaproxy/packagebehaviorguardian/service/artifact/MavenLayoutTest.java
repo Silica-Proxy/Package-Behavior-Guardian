@@ -56,6 +56,34 @@ class MavenLayoutTest {
     }
 
     @Test
+    void anyFileOfTheVersionIsBoundToTheCoordinates() {
+        URI classifier = URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.3/my-lib-1.2.3-sources.jar");
+        URI pom = URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.3/my-lib-1.2.3.pom");
+
+        assertThat(MavenLayout.requireFileOfVersion(classifier, coordinates, "1.2.3")).isEqualTo(classifier);
+        assertThat(MavenLayout.requireFileOfVersion(pom, coordinates, "1.2.3")).isEqualTo(pom);
+    }
+
+    @Test
+    void aFileOfAnotherVersionOrArtifactIsRefused() {
+        assertThatThrownBy(() -> MavenLayout.requireFileOfVersion(
+                URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.4/my-lib-1.2.4.jar"), coordinates, "1.2.3"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MavenLayout.requireFileOfVersion(
+                URI.create("https://repo1.maven.org/maven2/org/example/tools/other/1.2.3/other-1.2.3.jar"), coordinates, "1.2.3"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MavenLayout.requireFileOfVersion(
+                URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.3/my-lib-1.2.3.jar/evil.jar"), coordinates, "1.2.3"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MavenLayout.requireFileOfVersion(
+                URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.3/"), coordinates, "1.2.3"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MavenLayout.requireFileOfVersion(
+                URI.create("https://repo1.maven.org/maven2/org/example/tools/my-lib/1.2.3/my-lib-1.2.3x.jar"), coordinates, "1.2.3"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void namesMustBeGroupIdColonArtifactId() {
         assertThatThrownBy(() -> MavenLayout.Coordinates.parse("no-colon")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> MavenLayout.Coordinates.parse("a:b:c")).isInstanceOf(IllegalArgumentException.class);

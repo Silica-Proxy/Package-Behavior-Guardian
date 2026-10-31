@@ -34,6 +34,7 @@ public final class MavenLayout {
 
     private static final Pattern PACKAGING = Pattern.compile("<packaging>\\s*([^<\\s]+)\\s*</packaging>");
     private static final Pattern COMMENT = Pattern.compile("(?s)<!--.*?-->");
+    private static final Pattern FILE_SUFFIX = Pattern.compile("[.-][^/]+");
 
     private MavenLayout() {
     }
@@ -60,6 +61,23 @@ public final class MavenLayout {
         }
         return anyFileOfVersion.resolve(path.substring(0, index) + versionDirectory
                 + coordinates.artifactId() + "-" + version + "." + extension);
+    }
+
+    /**
+     * {@code url} itself if it is a file of that version: its path ends with
+     * {@code .../group/path/artifactId/version/artifactId-version<classifier and extension>}.
+     */
+    public static URI requireFileOfVersion(URI url, Coordinates coordinates, String version) {
+        String path = url.getRawPath() == null ? "" : url.getRawPath();
+        String fileStart = "/" + coordinates.groupId().replace('.', '/') + "/" + coordinates.artifactId() + "/" + version + "/"
+                + coordinates.artifactId() + "-" + version;
+        int index = path.lastIndexOf(fileStart);
+        String rest = index < 0 ? "" : path.substring(index + fileStart.length());
+        if (!FILE_SUFFIX.matcher(rest).matches()) {
+            throw new IllegalArgumentException("The Maven URL is not a file of " + coordinates.groupId() + ":"
+                    + coordinates.artifactId() + ":" + version);
+        }
+        return url;
     }
 
     /**

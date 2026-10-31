@@ -31,7 +31,7 @@ import org.springframework.stereotype.Component;
 /** GuardDog (Datadog, Apache-2.0) on each npm/PyPI artifact: {@code guarddog <ecosystem> scan <file> --output-format json}. */
 @Component
 @NullMarked
-public class GuardDogScanner implements StaticScanner {
+public class GuardDogScanner implements FileScanner {
 
     private final ProcessRunner processRunner;
     private final ToolProperties properties;
@@ -56,16 +56,18 @@ public class GuardDogScanner implements StaticScanner {
         return "npm".equals(ecosystem) || "pypi".equals(ecosystem);
     }
 
+    // GuardDog applies the rules of the ecosystem it is told: the same file gives other findings.
     @Override
-    public List<Finding> scan(ScanContext context) throws IOException {
-        List<Finding> findings = new ArrayList<>();
-        for (Path artifact : context.artifacts()) {
-            List<String> command = new ArrayList<>(properties.command());
-            command.addAll(List.of(context.ecosystem(), "scan", artifact.toString(), "--output-format", "json"));
-            findings.addAll(GuardDogReportParser.parse(
-                    processRunner.runForJsonReport(command, Duration.ofSeconds(properties.timeoutSeconds()), context.workDir()),
-                    String.valueOf(artifact.getFileName())));
-        }
-        return findings;
+    public String cacheKey(String ecosystem) {
+        return name() + ":" + ecosystem;
+    }
+
+    @Override
+    public List<Finding> scanFile(String ecosystem, Path artifact, Path workDir) throws IOException {
+        List<String> command = new ArrayList<>(properties.command());
+        command.addAll(List.of(ecosystem, "scan", artifact.toString(), "--output-format", "json"));
+        return GuardDogReportParser.parse(
+                processRunner.runForJsonReport(command, Duration.ofSeconds(properties.timeoutSeconds()), workDir),
+                String.valueOf(artifact.getFileName()));
     }
 }

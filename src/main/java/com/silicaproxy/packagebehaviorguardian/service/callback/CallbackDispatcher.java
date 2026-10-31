@@ -44,7 +44,8 @@ import org.springframework.stereotype.Component;
  * pending callback whose job is DONE. The verdict is recomputed at delivery time, so an allowlist
  * entry added in between is honored. 2xx: delivered. 404/410: SilicaProxy no longer knows the
  * token (already resolved, or expired) -- dropped. Anything else: retried with exponential
- * backoff, then dropped after {@code callback.max-attempts}. Runs on every instance; claiming
+ * backoff capped at {@code callback.max-backoff-seconds}, then dropped after
+ * {@code callback.max-attempts}. Runs on every instance; claiming
  * with SKIP LOCKED keeps two instances from sending the same callback.
  */
 @Component
@@ -105,13 +106,12 @@ public class CallbackDispatcher {
             callbackRepository.delete(callback.id());
             meterRegistry.counter(Metrics.CALLBACK_METRIC, Metrics.TAG_RESULT, Metrics.RESULT_GONE).increment();
         } else if (callback.attempts() >= properties.maxAttempts()) {
-            callbackRepository.delete(callback.id());
+            callbackRepository.giveUp(callback.id(), callback.attempts());
             meterRegistry.counter(Metrics.CALLBACK_FAILURES_METRIC).increment();
             LOG.error("Giving up callback {} for job {} after {} attempts (last status {})",
                     callback.id(), callback.jobId(), callback.attempts(), status);
         } else {
-            long delay = (long) properties.initialBackoffSeconds() << Math.min(callback.attempts() - 1, 20);
-            callbackRepository.reschedule(callback.id(), Duration.ofSeconds(delay));
+            callbackRepository.reschedule(callback.id(), properties.retryDelay(callback.attempts()));
             meterRegistry.counter(Metrics.CALLBACK_METRIC, Metrics.TAG_RESULT, Metrics.RESULT_RETRY).increment();
         }
     }

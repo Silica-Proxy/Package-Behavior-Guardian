@@ -29,10 +29,12 @@ import tools.jackson.databind.JsonNode;
 /**
  * Turns a GuardDog 3.x {@code --output-format json} report into findings. GuardDog 3 correlates its
  * YARA threat and capability rules into {@code risks} and rates the package with {@code
- * risk_score.label} (no_risks_detected / low / suspicious / high_risk). That calibrated rating drives
- * the verdict: {@code high_risk} gives a CRITICAL {@code GDG-RISK}, {@code suspicious} a HIGH one.
- * Each risk is also kept, as a LOW {@code GDG-<threat rule>} that does not count, so the report shows
- * why. Rule names are normalized to dashes (YARA reports them with underscores).
+ * risk_score.label} (no_risks_detected / low / suspicious / high_risk). That calibrated rating gives
+ * {@code GDG-RISK}: CRITICAL for {@code high_risk}, HIGH for {@code suspicious}. Each risk also gives a
+ * {@code GDG-<threat rule>} at GuardDog's own severity (high or critical: HIGH, medium: MEDIUM,
+ * otherwise LOW), raised to MEDIUM in a package rated suspicious or high_risk: the rating comes from
+ * those risks, so a suspicious package scores at least HIGH + MEDIUM and blocks. Rule names are
+ * normalized to dashes (YARA reports them with underscores).
  */
 @NullMarked
 public final class GuardDogReportParser {
@@ -52,6 +54,12 @@ public final class GuardDogReportParser {
         if (!report.path("errors").isEmpty()) {
             throw new IOException("GuardDog rule errors for " + artifactName + ": " + Texts.clip(report.path("errors").toString()));
         }
+        JsonNode score = report.path("risk_score");
+        Severity packageSeverity = switch (score.path("label").asString("")) {
+            case "high_risk" -> Severity.CRITICAL;
+            case "suspicious" -> Severity.HIGH;
+            default -> null;
+        };
         List<Finding> findings = new ArrayList<>();
         List<String> threats = new ArrayList<>();
         for (JsonNode risk : report.path("risks")) {
@@ -61,17 +69,12 @@ public final class GuardDogReportParser {
             }
             String description = risk.path("threat_description").asString(rule);
             String location = risk.path("threat_location").asString(risk.path("file_path").asString(""));
+            String guardDogSeverity = risk.path("severity").asString("?");
             threats.add(description);
-            findings.add(new Finding("GDG-" + Texts.clip(rule), Severity.LOW, SCANNER,
-                    Texts.clip(description + " (GuardDog severity " + risk.path("severity").asString("?") + ")"),
+            findings.add(new Finding("GDG-" + Texts.clip(rule), riskSeverity(guardDogSeverity, packageSeverity != null), SCANNER,
+                    Texts.clip(description + " (GuardDog severity " + guardDogSeverity + ")"),
                     Texts.clip(location.isEmpty() ? artifactName : artifactName + ": " + location)));
         }
-        JsonNode score = report.path("risk_score");
-        Severity packageSeverity = switch (score.path("label").asString("")) {
-            case "high_risk" -> Severity.CRITICAL;
-            case "suspicious" -> Severity.HIGH;
-            default -> null;
-        };
         if (packageSeverity != null) {
             findings.add(0, new Finding(PACKAGE_RISK_RULE, packageSeverity, SCANNER,
                     Texts.clip("GuardDog rates the package " + score.path("label").asString() + " (" + score.path("score").asDouble(0)
@@ -79,5 +82,14 @@ public final class GuardDogReportParser {
                     Texts.clip(artifactName)));
         }
         return findings;
+    }
+
+    private static Severity riskSeverity(String guardDogSeverity, boolean ratedRisky) {
+        Severity severity = switch (guardDogSeverity.toLowerCase(Locale.ROOT)) {
+            case "critical", "high" -> Severity.HIGH;
+            case "medium" -> Severity.MEDIUM;
+            default -> Severity.LOW;
+        };
+        return ratedRisky && severity == Severity.LOW ? Severity.MEDIUM : severity;
     }
 }

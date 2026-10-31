@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.NullMarked;
@@ -39,9 +40,12 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Runs an external scanner (GuardDog, malcontent) with a timeout, a capped stdout and a minimal
- * environment: the child only sees PATH, HOME, LANG, a TMPDIR inside the job's scratch directory and
- * the {@code GUARDDOG_*} settings of the image (e.g. {@code GUARDDOG_TOP_PACKAGES_CACHE_LOCATION}) --
- * never this service's own secrets (database password, API key).
+ * environment: the child only sees PATH, HOME, LANG, a TMPDIR equal to its HOME (inside the job's
+ * scratch directory) and the {@code GUARDDOG_*} settings of the image (e.g. {@code
+ * GUARDDOG_TOP_PACKAGES_CACHE_LOCATION}) -- never this service's own secrets (database password, API
+ * keys). In the image, the command starts with scanner-exec, which runs the tool under the job's own
+ * uid (see docker/scanner-exec.c): this service can then no longer signal the tool, so a timeout asks
+ * scanner-exec to stop it (SIGTERM) before killing scanner-exec itself.
  */
 @Component
 @NullMarked
@@ -50,6 +54,10 @@ public class ProcessRunner {
     private static final int MAX_STDOUT_BYTES = 64 * 1024 * 1024;
     private static final int STDERR_TAIL_BYTES = 4000;
     private static final String PASSED_PREFIX = "GUARDDOG_";
+    private static final String DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
+    private static final String HOME_DIRECTORY = "home";
+    // Time given to scanner-exec to kill the tool's processes and unlock the files they left.
+    private static final Duration STOP_GRACE = Duration.ofSeconds(5);
 
     private final ObjectMapper objectMapper;
 
@@ -85,6 +93,7 @@ public class ProcessRunner {
     // The parent environment is a parameter only so that tests can supply one.
     ProcessResult run(List<String> command, Duration timeout, Path workDir, Map<String, String> parentEnvironment)
             throws IOException {
+        Path home = Files.createDirectories(home(workDir));
         Path stderrFile = Files.createTempFile(workDir, "stderr-", ".log");
         ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(workDir.toFile())
@@ -92,16 +101,7 @@ public class ProcessRunner {
                 .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
         Map<String, String> environment = builder.environment();
         environment.clear();
-        environment.put("PATH", parentEnvironment.getOrDefault("PATH", "/usr/local/bin:/usr/bin:/bin"));
-        // Each job its own HOME: concurrent tools must not share caches or state.
-        environment.put("HOME", workDir.toString());
-        environment.put("LANG", "C.UTF-8");
-        environment.put("TMPDIR", workDir.toString());
-        parentEnvironment.forEach((name, value) -> {
-            if (name.startsWith(PASSED_PREFIX) && !value.isBlank()) {
-                environment.put(name, value);
-            }
-        });
+        environment.putAll(environment(parentEnvironment, home));
 
         Process process = builder.start();
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
@@ -109,14 +109,14 @@ public class ProcessRunner {
         Thread reader = Thread.ofVirtual().start(() -> drain(process.getInputStream(), stdout, truncated));
         try {
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
-                process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+                stop(process);
                 throw new HostileArtifactException(command.get(0) + " timed out after " + timeout.toSeconds() + "s", true);
             }
             reader.join(Duration.ofSeconds(10));
         } catch (InterruptedException e) {
+            // No waiting here (shutdown): SIGTERM lets scanner-exec kill the tool's processes itself.
             process.descendants().forEach(ProcessHandle::destroyForcibly);
-            process.destroyForcibly();
+            process.destroy();
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted while running " + command.get(0), e);
         }
@@ -124,6 +124,40 @@ public class ProcessRunner {
             throw new HostileArtifactException(command.get(0) + " produced more than " + MAX_STDOUT_BYTES / (1024 * 1024) + " MB of output", false);
         }
         return new ProcessResult(process.exitValue(), stdout.toString(StandardCharsets.UTF_8), tail(stderrFile));
+    }
+
+    /** The scanners' HOME and TMPDIR: the only place of the job's directory they may write to. */
+    public static Path home(Path workDir) {
+        return workDir.resolve(HOME_DIRECTORY);
+    }
+
+    // Built from scratch, never copied: whatever this service was given (database password, API
+    // keys, JAVA_TOOL_OPTIONS...) stays out of the tool's reach.
+    static Map<String, String> environment(Map<String, String> parentEnvironment, Path home) {
+        Map<String, String> environment = new TreeMap<>();
+        String path = parentEnvironment.get("PATH");
+        environment.put("PATH", path == null || path.isBlank() ? DEFAULT_PATH : path);
+        // Each job its own HOME: concurrent tools must not share caches or state.
+        environment.put("HOME", home.toString());
+        environment.put("LANG", "C.UTF-8");
+        environment.put("TMPDIR", home.toString());
+        parentEnvironment.forEach((name, value) -> {
+            if (name.startsWith(PASSED_PREFIX) && !value.isBlank()) {
+                environment.put(name, value);
+            }
+        });
+        return environment;
+    }
+
+    // Without scanner-exec (development) the tool and its children are killed directly. With it,
+    // they run under another uid and only scanner-exec can kill them: SIGTERM first, SIGKILL if it
+    // does not exit in time (the tool then still dies with it, through its parent-death signal).
+    private static void stop(Process process) throws InterruptedException {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroy();
+        if (!process.waitFor(STOP_GRACE.toMillis(), TimeUnit.MILLISECONDS)) {
+            process.destroyForcibly().waitFor(STOP_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+        }
     }
 
     private static void drain(InputStream in, ByteArrayOutputStream out, AtomicBoolean truncated) {

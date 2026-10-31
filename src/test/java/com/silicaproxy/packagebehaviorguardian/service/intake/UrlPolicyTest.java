@@ -52,7 +52,7 @@ class UrlPolicyTest {
         UrlPolicy explicitPort = new UrlPolicy(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties(
                 null, new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.IntakeProperties(
                         java.util.List.of("registry.npmjs.org:443"), java.util.List.of("silicaproxy:80"), true, false),
-                null, null, null, null, null, null, java.util.List.of()));
+                null, null, null, null, null, null, null, java.util.List.of()));
 
         assertThat(explicitPort.requireArtifactUrl("https://registry.npmjs.org/x.tgz")).isNotNull();
         assertThat(explicitPort.requireCallbackUrl("http://silicaproxy/external-validation/callback/x")).isNotNull();
@@ -63,7 +63,7 @@ class UrlPolicyTest {
         UrlPolicy httpCallbacks = new UrlPolicy(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties(
                 null, new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.IntakeProperties(
                         java.util.List.of("registry.npmjs.org"), java.util.List.of("silicaproxy:8080"), true, false),
-                null, null, null, null, null, null, java.util.List.of()));
+                null, null, null, null, null, null, null, java.util.List.of()));
 
         assertThat(httpCallbacks.requireCallbackUrl("http://silicaproxy:8080/external-validation/callback/x")).isNotNull();
         assertThatThrownBy(() -> httpCallbacks.requireArtifactUrl("http://registry.npmjs.org/x.tgz"))

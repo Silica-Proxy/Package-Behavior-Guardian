@@ -52,10 +52,49 @@ class ProcessRunnerTest {
                 "SPRING_DATASOURCE_PASSWORD", "secret",
                 "PACKAGEBEHAVIORGUARDIAN_API_KEY", "secret"));
 
-        assertThat(environment).contains("GUARDDOG_TOP_PACKAGES_CACHE_LOCATION=/var/cache/guarddog", "TMPDIR=" + workDir, "HOME=" + workDir)
+        Path home = workDir.resolve("home");
+        assertThat(environment).contains("GUARDDOG_TOP_PACKAGES_CACHE_LOCATION=/var/cache/guarddog", "TMPDIR=" + home, "HOME=" + home)
                 .noneMatch(line -> line.startsWith("GUARDDOG_UNSET=") || line.contains("secret"));
         assertThat(environment).extracting(line -> line.substring(0, line.indexOf('=')))
                 .containsExactlyInAnyOrder("PATH", "HOME", "LANG", "TMPDIR", "GUARDDOG_TOP_PACKAGES_CACHE_LOCATION");
+    }
+
+    @Test
+    void theEnvironmentIsBuiltFromScratch() {
+        Path home = workDir.resolve("home");
+        Map<String, String> parent = Map.of(
+                "PATH", "/opt/jre/bin:/usr/bin",
+                "JAVA_TOOL_OPTIONS", "-javaagent:/x.jar",
+                "JDK_JAVA_OPTIONS", "-Xmx1g",
+                "SPRING_DATASOURCE_PASSWORD", "secret",
+                "PACKAGEBEHAVIORGUARDIAN_REPORT_API_KEY", "secret",
+                "LD_PRELOAD", "/tmp/evil.so",
+                "PYTHONPATH", "/tmp",
+                "GUARDDOG_TOP_PACKAGES_CACHE_LOCATION", "/var/cache/guarddog");
+
+        assertThat(ProcessRunner.environment(parent, home)).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "PATH", "/opt/jre/bin:/usr/bin",
+                "HOME", home.toString(),
+                "TMPDIR", home.toString(),
+                "LANG", "C.UTF-8",
+                "GUARDDOG_TOP_PACKAGES_CACHE_LOCATION", "/var/cache/guarddog"));
+    }
+
+    @Test
+    void aMissingOrBlankPathFallsBackToTheSystemDirectories() {
+        Path home = workDir.resolve("home");
+
+        assertThat(ProcessRunner.environment(Map.of(), home)).containsEntry("PATH", "/usr/local/bin:/usr/bin:/bin");
+        assertThat(ProcessRunner.environment(Map.of("PATH", " "), home)).containsEntry("PATH", "/usr/local/bin:/usr/bin:/bin");
+    }
+
+    @Test
+    void theToolRunsInTheJobDirectoryWithItsHomeInside() throws IOException {
+        ProcessRunner.ProcessResult result = runner.run(List.of("/bin/sh", "-c", "pwd -P; touch \"$HOME/written\""),
+                Duration.ofSeconds(10), workDir, Map.of("PATH", "/usr/bin:/bin"));
+
+        assertThat(result.stdout().strip()).isEqualTo(workDir.toRealPath().toString());
+        assertThat(workDir.resolve("home/written")).exists();
     }
 
     @Test

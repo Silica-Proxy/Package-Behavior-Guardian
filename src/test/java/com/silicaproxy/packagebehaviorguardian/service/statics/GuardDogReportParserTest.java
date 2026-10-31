@@ -54,23 +54,43 @@ class GuardDogReportParserTest {
 
         assertThat(findings).extracting(Finding::ruleId, Finding::severity).containsExactly(
                 tuple("GDG-RISK", Severity.CRITICAL),
-                tuple("GDG-threat-runtime-obfuscation-base64exec", Severity.LOW),
-                tuple("GDG-threat-process-download-exec", Severity.LOW));
+                tuple("GDG-threat-runtime-obfuscation-base64exec", Severity.HIGH),
+                tuple("GDG-threat-process-download-exec", Severity.HIGH));
         assertThat(findings.get(0).message()).isEqualTo("GuardDog rates the package high_risk (7.8/10): "
                 + "Detects base64 decoding followed by code execution; Downloads then executes a binary");
         assertThat(findings.get(1).location()).isEqualTo("foo-1.0.0.tgz: package/index.js:3");
     }
 
     @Test
-    void aSuspiciousPackageIsHighAndALowOneAddsNothing() throws IOException {
-        String suspicious = "{\"risk_score\": {\"score\": 5.5, \"label\": \"suspicious\"}, \"risks\": []}";
+    void aSuspiciousPackageIsHighAndItsRisksAtLeastMedium() throws IOException {
+        String suspicious = "{\"risk_score\": {\"score\": 5.5, \"label\": \"suspicious\"}, \"risks\": "
+                + "[{\"threat_rule\": \"threat_network_outbound_shady_links\", \"severity\": \"low\", \"threat_description\": \"d\"}]}";
         String low = "{\"risk_score\": {\"score\": 2.0, \"label\": \"low\"}, \"risks\": "
                 + "[{\"threat_rule\": \"threat_network_outbound_shady_links\", \"severity\": \"low\", \"threat_description\": \"d\"}]}";
 
         assertThat(GuardDogReportParser.parse(mapper.readTree(suspicious), "x.tgz"))
-                .extracting(Finding::ruleId, Finding::severity).containsExactly(tuple("GDG-RISK", Severity.HIGH));
+                .extracting(Finding::ruleId, Finding::severity).containsExactly(
+                        tuple("GDG-RISK", Severity.HIGH), tuple("GDG-threat-network-outbound-shady-links", Severity.MEDIUM));
         assertThat(GuardDogReportParser.parse(mapper.readTree(low), "x.tgz"))
                 .extracting(Finding::severity).containsExactly(Severity.LOW);
+    }
+
+    @Test
+    void eachRiskCountsAtItsGuardDogSeverity() throws IOException {
+        String report = """
+                {"risk_score": {"score": 2.5, "label": "low"}, "risks": [
+                  {"threat_rule": "threat_a", "severity": "critical", "threat_description": "a"},
+                  {"threat_rule": "threat_b", "severity": "HIGH", "threat_description": "b"},
+                  {"threat_rule": "threat_c", "severity": "medium", "threat_description": "c"},
+                  {"threat_rule": "threat_d", "severity": "low", "threat_description": "d"},
+                  {"threat_rule": "threat_e", "threat_description": "e"}]}
+                """;
+
+        assertThat(GuardDogReportParser.parse(mapper.readTree(report), "x.tgz"))
+                .extracting(Finding::ruleId, Finding::severity).containsExactly(
+                        tuple("GDG-threat-a", Severity.HIGH), tuple("GDG-threat-b", Severity.HIGH),
+                        tuple("GDG-threat-c", Severity.MEDIUM), tuple("GDG-threat-d", Severity.LOW),
+                        tuple("GDG-threat-e", Severity.LOW));
     }
 
     @Test

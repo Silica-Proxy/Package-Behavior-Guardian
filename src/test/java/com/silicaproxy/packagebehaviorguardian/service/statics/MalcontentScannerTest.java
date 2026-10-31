@@ -20,11 +20,15 @@ package com.silicaproxy.packagebehaviorguardian.service.statics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.silicaproxy.packagebehaviorguardian.TestProperties;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.MalcontentProperties;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.ScannerProperties;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -48,5 +52,28 @@ class MalcontentScannerTest {
         ArgumentCaptor<List<String>> command = ArgumentCaptor.forClass(List.class);
         verify(runner).runForJsonReport(command.capture(), any(Duration.class), any(Path.class));
         assertThat(command.getValue()).containsExactly("mal", "--format=json", "--third-party=false", "analyze", "/tmp/foo.tgz");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theConfiguredLauncherPrefixesTheCommand() throws IOException {
+        ProcessRunner runner = mock(ProcessRunner.class);
+        when(runner.runForJsonReport(anyList(), any(Duration.class), any(Path.class)))
+                .thenReturn(JsonMapper.builder().build().readTree("{\"Files\": {}}"));
+        PackageBehaviorGuardianProperties defaults = TestProperties.defaults();
+        MalcontentProperties malcontent = new MalcontentProperties(true, List.of("/usr/local/bin/scanner-exec", "mal"), 300, false);
+        PackageBehaviorGuardianProperties properties = new PackageBehaviorGuardianProperties(defaults.security(), defaults.intake(),
+                defaults.artifact(), defaults.registries(), defaults.queue(), defaults.callback(), defaults.retention(), defaults.analysis(),
+                new ScannerProperties(defaults.scanners().guarddog(), malcontent, defaults.scanners().bytecode(),
+                        defaults.scanners().isolation()),
+                defaults.allowlist());
+
+        new MalcontentScanner(runner, properties)
+                .scan(new ScanContext("npm", "foo", "1.0.0", List.of(Path.of("/work/job/0-foo.tgz")), Path.of("/work/job")));
+
+        ArgumentCaptor<List<String>> command = ArgumentCaptor.forClass(List.class);
+        verify(runner).runForJsonReport(command.capture(), any(Duration.class), eq(Path.of("/work/job")));
+        assertThat(command.getValue()).containsExactly("/usr/local/bin/scanner-exec", "mal", "--format=json", "--third-party=false",
+                "analyze", "/work/job/0-foo.tgz");
     }
 }

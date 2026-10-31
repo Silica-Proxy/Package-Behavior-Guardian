@@ -11,3 +11,15 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # Base images of the Dockerfile, pinned by digest (tag kept): Dependabot bumps the digest
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # GuardDog's hash-pinned locks (pip-compile files in docker/)
+  - package-ecosystem: "pip"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"

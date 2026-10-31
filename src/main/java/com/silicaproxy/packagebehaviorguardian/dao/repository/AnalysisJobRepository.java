@@ -48,20 +48,31 @@ public class AnalysisJobRepository {
         this.jdbcClient = jdbcClient;
     }
 
-    /** Inserts a PENDING job unless one already exists for this package version; returns the job either way. */
+    /**
+     * Inserts a PENDING job unless one already exists for this package version; returns the job either way,
+     * locked until the end of the transaction: its status cannot change (a worker finishing it waits) while
+     * the caller decides from it. One statement -- the upsert takes the row lock itself -- also stamps
+     * {@code last_checked_at}, so {@link #purgeFinished} can neither delete the job between the insert and
+     * the read nor once the check has seen it.
+     */
     public AnalysisJob insertIfAbsent(String ecosystem, String name, String version, String artifactUrl) {
-        jdbcClient.sql("""
+        return jdbcClient.sql("""
                 INSERT INTO analysis_job (id, ecosystem, name, version, artifact_url, status)
                 VALUES (:id, :ecosystem, :name, :version, :artifactUrl, 'PENDING')
-                ON CONFLICT (ecosystem, name, version) DO NOTHING
-                """)
+                ON CONFLICT (ecosystem, name, version) DO UPDATE SET last_checked_at = now()
+                RETURNING
+                """ + COLUMNS)
                 .param("id", UUID.randomUUID())
                 .param("ecosystem", ecosystem)
                 .param("name", name)
                 .param("version", version)
                 .param("artifactUrl", artifactUrl)
-                .update();
-        return find(ecosystem, name, version).orElseThrow();
+                .query()
+                .listOfRows()
+                .stream()
+                .findFirst()
+                .map(AnalysisJobRepository::toJob)
+                .orElseThrow();
     }
 
     public Optional<AnalysisJob> find(String ecosystem, String name, String version) {
@@ -197,6 +208,34 @@ public class AnalysisJobRepository {
                 .param("error", error)
                 .param("delaySeconds", retryDelay.toSeconds())
                 .update();
+    }
+
+    /**
+     * Deletes, by batches of {@code batchSize}, the DONE and FAILED jobs neither updated nor checked for
+     * {@code retention} -- their result and callbacks go with them (ON DELETE CASCADE) -- but never one
+     * with a callback still waiting. Rows locked by a check or a worker are skipped, and the conditions
+     * are re-evaluated on the locked row, so a job checked meanwhile survives. Returns the jobs deleted.
+     */
+    public int purgeFinished(Duration retention, int batchSize) {
+        int total = 0;
+        int deleted;
+        do {
+            deleted = jdbcClient.sql("""
+                    DELETE FROM analysis_job WHERE id IN (
+                        SELECT j.id FROM analysis_job j
+                        WHERE j.status IN ('DONE', 'FAILED')
+                          AND j.updated_at < now() - make_interval(secs => :retentionSeconds)
+                          AND j.last_checked_at < now() - make_interval(secs => :retentionSeconds)
+                          AND NOT EXISTS (SELECT 1 FROM pending_callback pc WHERE pc.job_id = j.id)
+                        LIMIT :limit
+                        FOR UPDATE SKIP LOCKED)
+                    """)
+                    .param("retentionSeconds", retention.toSeconds())
+                    .param("limit", batchSize)
+                    .update();
+            total += deleted;
+        } while (deleted == batchSize);
+        return total;
     }
 
     public long countPending() {

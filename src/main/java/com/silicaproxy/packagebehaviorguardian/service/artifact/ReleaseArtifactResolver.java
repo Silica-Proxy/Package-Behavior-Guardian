@@ -35,9 +35,16 @@ import org.springframework.stereotype.Component;
  * Which files make up a version. SilicaProxy caches one verdict per (package, version), whatever
  * file was requested first, so the analysis must cover the whole version, not just that file:
  * <ul>
- *   <li>npm: the single tarball (the request URL);</li>
+ *   <li>npm: the single tarball (the request URL, which must be the tarball of that version);</li>
  *   <li>PyPI: every file listed by the JSON API (sdist and all wheels, yanked ones included) --
- *       otherwise a clean wheel asked first would vouch for a malicious sdist;</li>
+ *       otherwise a clean wheel asked first would vouch for a malicious sdist. That API is the one
+ *       of {@code registries.pypi-url}, so the requested file must come from that index (its own
+ *       host or one of {@code registries.pypi-file-hosts}): the list of another index's package of
+ *       the same name (a private index, a mirror under another name) would analyze other files
+ *       than the ones installed -- dependency confusion in the verdict. The JSON API base is not
+ *       derived from the artifact host: PyPI serves files and API from different hosts
+ *       ({@code files.pythonhosted.org} / {@code pypi.org}), and mirrors put the API under paths
+ *       of their own;</li>
  *   <li>Maven: the main artifact declared by the POM's packaging (none for {@code pom}), plus the
  *       requested file when it is another archive (a classifier jar, for instance).</li>
  * </ul>
@@ -54,6 +61,7 @@ public class ReleaseArtifactResolver {
     private final ArtifactDownloader downloader;
     private final UrlPolicy urlPolicy;
     private final int maxFilesPerVersion;
+    private final List<String> pypiHosts;
 
     public ReleaseArtifactResolver(RegistryClient registryClient, ArtifactDownloader downloader, UrlPolicy urlPolicy,
             PackageBehaviorGuardianProperties properties) {
@@ -61,6 +69,20 @@ public class ReleaseArtifactResolver {
         this.downloader = downloader;
         this.urlPolicy = urlPolicy;
         this.maxFilesPerVersion = properties.artifact().maxFilesPerVersion();
+        List<String> hosts = new ArrayList<>(properties.registries().pypiFileHosts());
+        hosts.add(UrlPolicy.authorityOf(URI.create(properties.registries().pypiUrl())));
+        this.pypiHosts = List.copyOf(hosts);
+    }
+
+    /**
+     * Rejects a PyPI artifact URL that the JSON API of {@code registries.pypi-url} does not describe;
+     * other ecosystems are analyzed from the URL itself.
+     */
+    public void requireListedHost(String ecosystem, URI artifactUrl) {
+        if ("pypi".equals(ecosystem) && !UrlPolicy.hostMatches(artifactUrl, pypiHosts)) {
+            throw new IllegalArgumentException("The PyPI artifact host " + UrlPolicy.authorityOf(artifactUrl)
+                    + " is not served by registries.pypi-url (see registries.pypi-file-hosts)");
+        }
     }
 
     public record ReleaseArtifacts(List<URI> files) {
@@ -73,14 +95,17 @@ public class ReleaseArtifactResolver {
     public ReleaseArtifacts resolve(AnalysisJob job) throws IOException {
         URI requested = urlPolicy.requireArtifactUrl(job.artifactUrl());
         return switch (job.ecosystem()) {
-            case "npm" -> new ReleaseArtifacts(List.of(requested));
+            case "npm" -> new ReleaseArtifacts(List.of(NpmLayout.requireTarball(requested, job.name(), job.version())));
             case "pypi" -> pypi(job, requested);
             case "maven" -> maven(job, requested);
             default -> throw new IllegalArgumentException("Unsupported ecosystem " + job.ecosystem());
         };
     }
 
+    // Checked again here for jobs queued before the configuration changed: such a job fails, it is
+    // not analyzed from the wrong index.
     private ReleaseArtifacts pypi(AnalysisJob job, URI requested) throws IOException {
+        requireListedHost(job.ecosystem(), requested);
         List<String> files = registryClient.pypiVersionFiles(job.name(), job.version());
         if (files.isEmpty()) {
             return new ReleaseArtifacts(List.of(requested));

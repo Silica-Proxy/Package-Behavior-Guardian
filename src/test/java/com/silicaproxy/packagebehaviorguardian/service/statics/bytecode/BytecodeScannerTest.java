@@ -77,6 +77,133 @@ class BytecodeScannerTest {
     }
 
     @Test
+    void aCredentialPathOnlyInAStringConcatenationRecipeIsHigh() throws IOException {
+        // javac 9+ folds the constant part of `getProperty("user.home") + "/.aws/credentials"` into the
+        // invokedynamic recipe: no ldc carries it.
+        List<Finding> findings = scan("com.evil", TestJars.entries("com/evil/Steal.class",
+                TestJars.classWithConcatInStaticInitializer("com/evil/Steal", "user.home", "/.aws/credentials")));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-004", Severity.HIGH));
+    }
+
+    @Test
+    void execInAnImplementationOfAJarInterfaceCalledFromAStaticInitializerIsCritical() throws IOException {
+        List<Finding> findings = scan("com.evil", TestJars.entries(
+                "com/evil/Init.class", TestJars.classWithStaticInitializerCalling("com/evil/Init", "com/evil/Plugin.run"),
+                "com/evil/Plugin.class", TestJars.interfaceWithRun("com/evil/Plugin"),
+                "com/evil/EvilPlugin.class",
+                TestJars.classImplementing("com/evil/EvilPlugin", "com/evil/Plugin", new String[] {"java/lang/Runtime.exec"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-001", Severity.CRITICAL));
+        assertThat(findings.get(0).location()).isEqualTo("com/evil/Init#<clinit> via com/evil/EvilPlugin#run");
+    }
+
+    @Test
+    void execInASubclassOverrideCalledThroughItsJarSuperclassIsCritical() throws IOException {
+        List<Finding> findings = scan("com.evil", TestJars.entries(
+                "com/evil/Init.class", TestJars.classWithStaticInitializerCalling("com/evil/Init", "com/evil/Task.run"),
+                "com/evil/Task.class", TestJars.classCalling("com/evil/Task", "java/lang/Object", new String[0]),
+                "com/evil/EvilTask.class",
+                TestJars.classCalling("com/evil/EvilTask", "com/evil/Task", new String[] {"java/lang/Runtime.exec"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-001", Severity.CRITICAL));
+    }
+
+    @Test
+    void anAnnotationProcessorDeclaredInModuleInfoIsRecognized() throws IOException {
+        List<Finding> findings = scan("com.example", TestJars.entries(
+                "module-info.class",
+                TestJars.moduleInfoProviding("com.example", "javax/annotation/processing/Processor", "com/example/Proc"),
+                "com/example/Proc.class",
+                TestJars.classCalling("com/example/Proc", "java/lang/Object", new String[] {"java/lang/ProcessBuilder.start"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity).containsExactlyInAnyOrder(
+                org.assertj.core.groups.Tuple.tuple("JVM-001", Severity.CRITICAL),
+                org.assertj.core.groups.Tuple.tuple("JVM-006", Severity.MEDIUM));
+        assertThat(findings).filteredOn(finding -> "JVM-006".equals(finding.ruleId()))
+                .extracting(Finding::location).containsExactly("com/example/Proc");
+    }
+
+    @Test
+    void aClassExtendingAbstractProcessorThroughAnotherJarClassIsAProcessor() throws IOException {
+        List<Finding> findings = scan("com.example", TestJars.entries(
+                "com/example/BaseProcessor.class",
+                TestJars.classCalling("com/example/BaseProcessor", "javax/annotation/processing/AbstractProcessor", new String[0]),
+                "com/example/Proc.class",
+                TestJars.classCalling("com/example/Proc", "com/example/BaseProcessor", new String[] {"java/lang/Runtime.exec"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-001", Severity.CRITICAL));
+        assertThat(findings.get(0).location()).isEqualTo("com/example/Proc#run");
+    }
+
+    @Test
+    void aUrlBuiltByAHelperAndOpenedByTheProcessorIsNetwork() throws IOException {
+        List<Finding> findings = scan("org.projectlombok", TestJars.entries(
+                "META-INF/services/javax.annotation.processing.Processor", "com.example.Proc\n",
+                "com/example/Proc.class", TestJars.classCalling("com/example/Proc", "java/lang/Object",
+                        new String[] {"com/example/Urls.run", "java/net/URL.openConnection"}),
+                "com/example/Urls.class",
+                TestJars.classCalling("com/example/Urls", "java/lang/Object", new String[] {"java/net/URL.<init>"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-003", Severity.HIGH));
+    }
+
+    @Test
+    void aUrlBuiltInAnotherMethodOfTheReadingClassIsNetwork() throws IOException {
+        // Proc.run() { Http.fetch(Http.build()); }: the URL is built and opened by two sibling methods.
+        List<Finding> findings = scan("org.projectlombok", TestJars.entries(
+                "META-INF/services/javax.annotation.processing.Processor", "com.example.Proc\n",
+                "com/example/Proc.class", TestJars.classCalling("com/example/Proc", "java/lang/Object",
+                        new String[] {"com/example/Http.build", "com/example/Http.fetch"}),
+                "com/example/Http.class", TestJars.classWithMethods("com/example/Http", Map.of(
+                        "build", new String[] {"java/net/URL.<init>"}, "fetch", new String[] {"java/net/URL.openConnection"}))));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::severity)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("JVM-003", Severity.HIGH));
+        assertThat(findings.get(0).location()).isEqualTo("com/example/Proc#run via com/example/Http#fetch");
+    }
+
+    @Test
+    void definingAClassFromBytesDecodedByAHelperIsCritical() throws IOException {
+        List<Finding> findings = scan("com.evil", TestJars.entries(
+                "com/evil/Loader.class", TestJars.classCalling("com/evil/Loader", "java/lang/ClassLoader",
+                        new String[] {"com/evil/Decoder.run", "com/evil/Loader.defineClass"}),
+                "com/evil/Decoder.class",
+                TestJars.classCalling("com/evil/Decoder", "java/lang/Object", new String[] {"java/util/Base64$Decoder.decode"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::location).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("JVM-002", "com/evil/Loader#run"));
+    }
+
+    @Test
+    void decodedBytesHandedOverToAnotherClassThatDefinesThemAreCritical() throws IOException {
+        List<Finding> findings = scan("com.evil", TestJars.entries(
+                "com/evil/Stage.class", TestJars.classCalling("com/evil/Stage", "java/lang/Object",
+                        new String[] {"java/util/Base64$Decoder.decode", "com/evil/Loader.run"}),
+                "com/evil/Loader.class",
+                TestJars.classCalling("com/evil/Loader", "java/lang/ClassLoader", new String[] {"com/evil/Loader.defineClass"})));
+
+        assertThat(findings).extracting(Finding::ruleId, Finding::location).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("JVM-002", "com/evil/Stage#run via com/evil/Loader#run"));
+    }
+
+    @Test
+    void aClassGeneratorReachingAnXorElsewhereIsNotReported() throws IOException {
+        // A hashCode() XORing in a class the defining method happens to reach is not a decoder.
+        List<Finding> findings = scan("net.bytebuddy", TestJars.entries(
+                "net/bytebuddy/Injector.class", TestJars.classCalling("net/bytebuddy/Injector", "java/lang/ClassLoader",
+                        new String[] {"net/bytebuddy/Key.run", "net/bytebuddy/Injector.defineClass"}),
+                "net/bytebuddy/Key.class", TestJars.classWithXor("net/bytebuddy/Key")));
+
+        assertThat(findings).isEmpty();
+    }
+
+    @Test
     void aBenignCopyOfAClassDoesNotHideItsMultiReleaseVariant() throws IOException {
         List<Finding> findings = scan("com.evil", TestJars.entries(
                 "com/evil/Init.class", TestJars.classWithStaticInitializerCalling("com/evil/Init", "com/evil/Helper.run"),

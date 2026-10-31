@@ -66,6 +66,9 @@ public final class BytecodeRules {
     private static final Call BASE64_DECODE = new Call("java/util/Base64$Decoder", "decode");
     private static final Set<Call> URL_READS = Set.of(new Call("java/net/URL", "openConnection"), new Call("java/net/URL", "openStream"));
     private static final Set<Call> URL_BUILDERS = Set.of(new Call("java/net/URL", "<init>"), new Call("java/net/URI", "toURL"));
+    private static final Call URL_CLASS_LOADER = new Call("java/net/URLClassLoader", "<init>");
+    private static final String PROCESSOR_BASE = "javax/annotation/processing/AbstractProcessor";
+    private static final String PROCESSOR_INTERFACE = "javax/annotation/processing/Processor";
 
     private final List<String> knownAnnotationProcessorGroups;
 
@@ -77,7 +80,7 @@ public final class BytecodeRules {
         Map<String, List<Finding>> byRule = new HashMap<>();
         CallGraph graph = new CallGraph(jar);
         for (ClassFacts type : jar.classes()) {
-            String context = contextOf(type, jar);
+            String context = contextOf(type, jar, graph);
             boolean mojo = jar.pluginMojos().contains(type.name())
                     || graph.inherits(type.name(), "org/apache/maven/plugin/AbstractMojo", "org/apache/maven/plugin/Mojo");
             for (MethodFacts method : type.methods()) {
@@ -85,10 +88,10 @@ public final class BytecodeRules {
                 String methodContext = "<clinit>".equals(method.name()) ? "a static initializer" : context;
                 if (!methodContext.isEmpty() || mojo) {
                     CallGraph.Reach reach = graph.reachFrom(method);
-                    execAndNetwork(reach.calls(), methodContext, location, byRule);
+                    execAndNetwork(graph, reach.calls(), methodContext, location, byRule);
                     reflection(reach, methodContext, location, byRule);
                 }
-                classLoading(method, location, byRule);
+                classLoading(graph, method, location, byRule);
             }
             sensitivePaths(type, byRule);
         }
@@ -100,20 +103,22 @@ public final class BytecodeRules {
     }
 
     // "" = ordinary class: exec/network there are not reported (the application
-    // decides when to call them).
-    private static String contextOf(ClassFacts type, JarFacts jar) {
-        if (jar.annotationProcessors().contains(type.name())) {
+    // decides when to call them). A processor is declared (services file, module-info) or inherits
+    // AbstractProcessor / Processor, possibly through other jar classes: a base class shared by the
+    // declared processors runs at compile time too.
+    private static String contextOf(ClassFacts type, JarFacts jar, CallGraph graph) {
+        if (jar.annotationProcessors().contains(type.name()) || graph.inherits(type.name(), PROCESSOR_BASE, PROCESSOR_INTERFACE)) {
             return "an annotation processor";
         }
         return "";
     }
 
     // An empty context means a Mojo method (the only other case the caller passes in).
-    private static void execAndNetwork(List<CallGraph.ExternalCall> calls, String context, String location,
+    private static void execAndNetwork(CallGraph graph, List<CallGraph.ExternalCall> calls, String context, String location,
             Map<String, List<Finding>> byRule) {
         CallGraph.ExternalCall exec = calls.stream().filter(call -> EXEC_CALLS.contains(call.call())).findFirst().orElse(null);
         CallGraph.ExternalCall network = calls.stream()
-                .filter(call -> NETWORK_CALLS.contains(call.call()) && (!URL_READS.contains(call.call()) || buildsUrl(calls, call)))
+                .filter(call -> NETWORK_CALLS.contains(call.call()) && (!URL_READS.contains(call.call()) || buildsUrl(graph, calls, call)))
                 .findFirst().orElse(null);
         boolean sensitive = !context.isEmpty();
         String where = sensitive ? context : "a Maven Mojo";
@@ -149,10 +154,15 @@ public final class BytecodeRules {
     }
 
     // URL.openStream/openConnection on a URL from getResource() reads the jar itself: it only counts
-    // as network when the calling method builds the URL (new URL(...) / URI.toURL()).
-    private static boolean buildsUrl(List<CallGraph.ExternalCall> calls, CallGraph.ExternalCall read) {
-        return calls.stream().anyMatch(call -> URL_BUILDERS.contains(call.call())
-                && call.fromClass().equals(read.fromClass()) && call.fromMethod().equals(read.fromMethod()));
+    // as network when the URL is built (new URL(...) / URI.toURL()) by the reading class, or by a
+    // method the reading method calls (a helper returning the URL). A URL built anywhere else in the
+    // reach is not enough: processors and Mojos read their own resources and build unrelated URLs.
+    private static boolean buildsUrl(CallGraph graph, List<CallGraph.ExternalCall> calls, CallGraph.ExternalCall read) {
+        if (calls.stream().anyMatch(call -> URL_BUILDERS.contains(call.call()) && call.fromClass().equals(read.fromClass()))) {
+            return true;
+        }
+        return graph.declared(read.fromClass(), read.fromMethod()).stream().anyMatch(method ->
+                graph.reachFrom(method).calls().stream().anyMatch(call -> URL_BUILDERS.contains(call.call())));
     }
 
     private static String simpleName(CallGraph.ExternalCall call) {
@@ -165,13 +175,28 @@ public final class BytecodeRules {
         return from.equals(location) ? "" : " via " + from;
     }
 
-    private static void classLoading(MethodFacts method, String location, Map<String, List<Finding>> byRule) {
+    // JVM-002. The bytes may be decoded by a helper the defining method calls, or by a method that
+    // hands them over to the defining one: Base64 decoding is followed through the call graph in both
+    // directions. XOR only counts in the defining method itself -- hash codes XOR everywhere, and a
+    // class-generating library (ByteBuddy, Javassist) would reach one.
+    private static void classLoading(CallGraph graph, MethodFacts method, String location, Map<String, List<Finding>> byRule) {
         boolean defines = method.callsNamed("defineClass") || method.callsNamed("defineHiddenClass")
-                || method.calls("java/net/URLClassLoader", "<init>");
-        boolean decodes = method.calls("java/util/Base64$Decoder", "decode") || method.usesXor();
-        if (defines && decodes) {
-            add(byRule, "JVM-002", Severity.CRITICAL, "Defines classes from decoded bytes (Base64 / XOR)", location);
+                || method.calls(URL_CLASS_LOADER.owner(), URL_CLASS_LOADER.name());
+        boolean decodes = method.calls(BASE64_DECODE.owner(), BASE64_DECODE.name());
+        String message = "Defines classes from decoded bytes (Base64 / XOR)";
+        if (defines) {
+            if (decodes || method.usesXor() || graph.reachFrom(method).calls().stream().anyMatch(call -> BASE64_DECODE.equals(call.call()))) {
+                add(byRule, "JVM-002", Severity.CRITICAL, message, location);
+            }
+        } else if (decodes) {
+            graph.reachFrom(method).calls().stream().filter(BytecodeRules::definesClasses).findFirst()
+                    .ifPresent(define -> add(byRule, "JVM-002", Severity.CRITICAL, message, location + via(define, location)));
         }
+    }
+
+    private static boolean definesClasses(CallGraph.ExternalCall call) {
+        String name = call.call().name();
+        return "defineClass".equals(name) || "defineHiddenClass".equals(name) || URL_CLASS_LOADER.equals(call.call());
     }
 
     private static void sensitivePaths(ClassFacts type, Map<String, List<Finding>> byRule) {

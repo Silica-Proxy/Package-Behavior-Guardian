@@ -68,7 +68,77 @@ class VerdictPolicyTest {
         assertThat(below.verdict()).isEqualTo(Verdict.ALLOWED);
         assertThat(below.score()).isEqualTo(40);
         assertThat(atThreshold.verdict()).isEqualTo(Verdict.BLOCKED);
-        assertThat(atThreshold.reason()).startsWith("BLOCKED: score 70 >= 60 (JVM-004, JVM-005, JVM-006), manual review required");
+        assertThat(atThreshold.reason()).startsWith("BLOCKED: score 80 >= 60 (JVM-004, JVM-005, JVM-006), manual review required");
+    }
+
+    @Test
+    void oneHighAndOneMediumBlock() {
+        Decision maven = policy.decide("maven", "g:a", "1.0", List.of(
+                finding("JVM-004", Severity.HIGH, "m"), finding("JVM-006", Severity.MEDIUM, "m")));
+        Decision malcontent = policy.decide("npm", "foo", "1.0.0", List.of(
+                finding("BEH-072", Severity.HIGH, "m"), finding("BEH-073", Severity.MEDIUM, "m")));
+
+        assertThat(maven.verdict()).isEqualTo(Verdict.BLOCKED);
+        assertThat(maven.score()).isEqualTo(60);
+        assertThat(malcontent.verdict()).isEqualTo(Verdict.BLOCKED);
+    }
+
+    @Test
+    void aSuspiciousGuardDogPackageBlocks() {
+        Decision decision = policy.decide("pypi", "foo", "1.0.0", List.of(
+                finding("GDG-RISK", Severity.HIGH, "GuardDog rates the package suspicious"),
+                finding("GDG-threat-network-outbound-shady-links", Severity.MEDIUM, "m")));
+
+        assertThat(decision.verdict()).isEqualTo(Verdict.BLOCKED);
+        assertThat(decision.reason()).startsWith("BLOCKED: score 60 >= 60 (GDG-RISK, GDG-threat-network-outbound-shady-links)");
+    }
+
+    @Test
+    void aLoneMediumOrWeakSignalIsAllowed() {
+        Decision oneMedium = policy.decide("npm", "foo", "1.0.0", List.of(finding("BEH-073", Severity.MEDIUM, "m")));
+        Decision twoMedium = policy.decide("npm", "foo", "1.0.0", List.of(
+                finding("BEH-073", Severity.MEDIUM, "m"), finding("GDG-threat-x", Severity.MEDIUM, "m")));
+        Decision low = policy.decide("npm", "foo", "1.0.0", List.of(
+                finding("GDG-threat-x", Severity.LOW, "m"), finding("GDG-threat-y", Severity.LOW, "m")));
+        Decision threeMedium = policy.decide("npm", "foo", "1.0.0", List.of(finding("BEH-073", Severity.MEDIUM, "m"),
+                finding("GDG-threat-x", Severity.MEDIUM, "m"), finding("GDG-threat-y", Severity.MEDIUM, "m")));
+
+        assertThat(oneMedium.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(oneMedium.score()).isEqualTo(20);
+        assertThat(twoMedium.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(low.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(low.score()).isZero();
+        assertThat(threeMedium.verdict()).isEqualTo(Verdict.BLOCKED);
+    }
+
+    @Test
+    void aGuardDogRiskEntryAlsoCoversTheRisksOfTheRating() {
+        VerdictPolicy withAllowlist = policy(TestProperties.withAllowlist(List.of(
+                new AllowlistEntry("npm", "esbuild", null, "GDG-RISK", null, "install script reviewed"))));
+        Decision decision = withAllowlist.decide("npm", "esbuild", "0.25.0", List.of(
+                finding("GDG-RISK", Severity.HIGH, "m"), finding("GDG-threat-npm-install-script", Severity.MEDIUM, "m"),
+                finding("BEH-072", Severity.HIGH, "m")));
+
+        assertThat(decision.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(decision.counted()).extracting(Finding::ruleId).containsExactly("BEH-072");
+    }
+
+    @Test
+    void aDetailedGuardDogEntryDoesNotHideAThreatThatAppearedLater() {
+        VerdictPolicy withAllowlist = policy(TestProperties.withAllowlist(List.of(
+                new AllowlistEntry("npm", "esbuild", null, "GDG-RISK", "install script", "install script reviewed"))));
+        Finding rating = finding("GDG-RISK", Severity.CRITICAL,
+                "GuardDog rates the package high_risk (8.0/10): install script; shady links");
+        Finding reviewed = finding("GDG-threat-npm-install-script", Severity.MEDIUM, "install script");
+        Finding newThreat = finding("GDG-threat-network-outbound-shady-links", Severity.MEDIUM, "shady links");
+
+        Decision later = withAllowlist.decide("npm", "esbuild", "0.26.0", List.of(rating, reviewed, newThreat));
+        assertThat(later.verdict()).isEqualTo(Verdict.BLOCKED);
+        assertThat(later.counted()).containsExactlyInAnyOrder(rating, newThreat);
+
+        Decision reviewedOnly = withAllowlist.decide("npm", "esbuild", "0.25.0", List.of(rating, reviewed));
+        assertThat(reviewedOnly.verdict()).isEqualTo(Verdict.ALLOWED);
+        assertThat(reviewedOnly.allowlisted()).containsExactlyInAnyOrder(rating, reviewed);
     }
 
     @Test
@@ -78,7 +148,7 @@ class VerdictPolicyTest {
                 finding("JVM-001", Severity.MEDIUM, "c"), finding("JVM-001", Severity.MEDIUM, "d")));
 
         assertThat(decision.verdict()).isEqualTo(Verdict.ALLOWED);
-        assertThat(decision.score()).isEqualTo(15);
+        assertThat(decision.score()).isEqualTo(20);
     }
 
     @Test

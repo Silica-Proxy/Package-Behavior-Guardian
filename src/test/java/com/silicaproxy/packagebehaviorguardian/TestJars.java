@@ -27,6 +27,7 @@ import java.util.zip.ZipOutputStream;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.ModuleVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
@@ -119,6 +120,104 @@ public final class TestJars {
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(0, 0);
         method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /** Like {@link #classCalling}, for a class extending {@code java/lang/Object} and implementing {@code interfaceName}. */
+    public static byte[] classImplementing(String internalName, String interfaceName, String[] calls) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", new String[] {interfaceName});
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null);
+        method.visitCode();
+        for (String call : calls) {
+            int dot = call.lastIndexOf('.');
+            method.visitMethodInsn(Opcodes.INVOKESTATIC, call.substring(0, dot), call.substring(dot + 1), "()V", false);
+        }
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /** A class extending {@code java/lang/Object} with one method per key, calling each {@code owner.name} of its value. */
+    public static byte[] classWithMethods(String internalName, Map<String, String[]> methodCalls) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        for (Map.Entry<String, String[]> entry : methodCalls.entrySet()) {
+            MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, entry.getKey(), "()V", null, null);
+            method.visitCode();
+            for (String call : entry.getValue()) {
+                int dot = call.lastIndexOf('.');
+                method.visitMethodInsn(Opcodes.INVOKESTATIC, call.substring(0, dot), call.substring(dot + 1), "()V", false);
+            }
+            method.visitInsn(Opcodes.RETURN);
+            method.visitMaxs(0, 0);
+            method.visitEnd();
+        }
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /** A class whose method {@code run()} returns {@code a ^ b} (a hashCode-like XOR, not a decoder). */
+    public static byte[] classWithXor(String internalName) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "run", "(II)I", null, null);
+        method.visitCode();
+        method.visitVarInsn(Opcodes.ILOAD, 0);
+        method.visitVarInsn(Opcodes.ILOAD, 1);
+        method.visitInsn(Opcodes.IXOR);
+        method.visitInsn(Opcodes.IRETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /** An interface declaring the abstract method {@code run()}. */
+    public static byte[] interfaceWithRun(String internalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT, internalName, null,
+                "java/lang/Object", null);
+        writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, "run", "()V", null, null).visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /** A {@code module-info.class} declaring {@code provides service with providers} (internal names). */
+    public static byte[] moduleInfoProviding(String moduleName, String service, String... providers) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_MODULE, "module-info", null, null, null);
+        ModuleVisitor module = writer.visitModule(moduleName, 0, null);
+        module.visitRequire("java.base", Opcodes.ACC_MANDATED, null);
+        module.visitProvide(service, providers);
+        module.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    /**
+     * A class whose static initializer runs {@code System.getProperty(property) + suffix}, compiled as
+     * javac 9+ does: {@code suffix} only exists in the invokedynamic string-concatenation recipe.
+     */
+    public static byte[] classWithConcatInStaticInitializer(String internalName, String property, String suffix) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        MethodVisitor clinit = writer.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
+        clinit.visitCode();
+        clinit.visitLdcInsn(property);
+        clinit.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/System", "getProperty", "(Ljava/lang/String;)Ljava/lang/String;", false);
+        Handle concatFactory = new Handle(Opcodes.H_INVOKESTATIC, "java/lang/invoke/StringConcatFactory", "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;"
+                        + "[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;", false);
+        clinit.visitInvokeDynamicInsn("makeConcatWithConstants", "(Ljava/lang/String;)Ljava/lang/String;", concatFactory,
+                "\u0001" + suffix);
+        clinit.visitInsn(Opcodes.POP);
+        clinit.visitInsn(Opcodes.RETURN);
+        clinit.visitMaxs(0, 0);
+        clinit.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }

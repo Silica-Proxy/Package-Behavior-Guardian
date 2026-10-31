@@ -35,7 +35,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @NullMarked
-public class MalcontentScanner implements StaticScanner {
+public class MalcontentScanner implements FileScanner {
 
     private final ProcessRunner processRunner;
     private final MalcontentProperties properties;
@@ -60,16 +60,18 @@ public class MalcontentScanner implements StaticScanner {
         return true;
     }
 
+    // Same rules whatever the ecosystem; third-party rules change the findings.
     @Override
-    public List<Finding> scan(ScanContext context) throws IOException {
-        List<Finding> findings = new ArrayList<>();
-        for (Path artifact : context.artifacts()) {
-            List<String> command = new ArrayList<>(properties.command());
-            command.addAll(List.of("--format=json", "--third-party=" + properties.thirdPartyRules(), "analyze", artifact.toString()));
-            findings.addAll(MalcontentReportParser.parse(
-                    processRunner.runForJsonReport(command, Duration.ofSeconds(properties.timeoutSeconds()), context.workDir()),
-                    String.valueOf(artifact.getFileName())));
-        }
-        return findings;
+    public String cacheKey(String ecosystem) {
+        return properties.thirdPartyRules() ? name() + ":third-party" : name();
+    }
+
+    @Override
+    public List<Finding> scanFile(String ecosystem, Path artifact, Path workDir) throws IOException {
+        List<String> command = new ArrayList<>(properties.command());
+        command.addAll(List.of("--format=json", "--third-party=" + properties.thirdPartyRules(), "analyze", artifact.toString()));
+        return MalcontentReportParser.parse(
+                processRunner.runForJsonReport(command, Duration.ofSeconds(properties.timeoutSeconds()), workDir),
+                String.valueOf(artifact.getFileName()));
     }
 }

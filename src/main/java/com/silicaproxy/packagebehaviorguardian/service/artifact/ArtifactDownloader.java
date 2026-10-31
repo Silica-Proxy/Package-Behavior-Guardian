@@ -20,6 +20,7 @@ package com.silicaproxy.packagebehaviorguardian.service.artifact;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
 import com.silicaproxy.packagebehaviorguardian.service.intake.UrlPolicy;
 import com.silicaproxy.packagebehaviorguardian.service.statics.HostileArtifactException;
+import jakarta.annotation.PreDestroy;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +38,13 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -46,7 +53,9 @@ import org.springframework.stereotype.Component;
  * their CDN; an allowed host must not be able to bounce us to an internal address). Bodies are
  * streamed and aborted as soon as they exceed {@code artifact.max-size-mb} (20 MB for metadata,
  * which is held in memory) or take longer than {@link #TIMEOUT} -- the request timeout alone only
- * covers the response headers, not a server dripping the body byte by byte.
+ * covers the response headers, not a server dripping the body byte by byte or sending nothing at
+ * all. A watchdog closes the body when that deadline passes, so even a {@code read()} blocked on a
+ * silent server returns.
  */
 @Component
 @NullMarked
@@ -60,6 +69,8 @@ public class ArtifactDownloader {
     private final HttpClient httpClient;
     private final UrlPolicy urlPolicy;
     private final long maxBytes;
+    private final ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("artifact-download-watchdog").daemon().factory());
 
     public ArtifactDownloader(HttpClient httpClient, UrlPolicy urlPolicy, PackageBehaviorGuardianProperties properties) {
         this.httpClient = httpClient;
@@ -76,7 +87,7 @@ public class ArtifactDownloader {
         MessageDigest digest = sha256();
         long size;
         try (InputStream in = body.get(); OutputStream out = new DigestOutputStream(Files.newOutputStream(target), digest)) {
-            size = copyCapped(in, out, maxBytes, true, url);
+            size = copyCapped(in, out, maxBytes, true, url, watchdog, TIMEOUT);
         }
         return Optional.of(new DownloadedArtifact(url, target, HexFormat.of().formatHex(digest.digest()), size));
     }
@@ -86,7 +97,7 @@ public class ArtifactDownloader {
         InputStream body = get(url).orElseThrow(() -> new IOException("Not found: " + url));
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (body) {
-            copyCapped(body, out, MAX_METADATA_BYTES, false, url);
+            copyCapped(body, out, MAX_METADATA_BYTES, false, url, watchdog, TIMEOUT);
         }
         return out.toByteArray();
     }
@@ -127,10 +138,38 @@ public class ArtifactDownloader {
         }
     }
 
+    @PreDestroy
+    public void shutdown() {
+        watchdog.shutdownNow();
+    }
+
+    // Past the deadline the watchdog closes the body. Depending on the stream, the blocked read() then
+    // throws or returns -1 (the JDK HttpClient's does): a body closed early is never taken as complete.
+    static long copyCapped(InputStream in, OutputStream out, long limit, boolean artifact, URI url,
+            ScheduledExecutorService watchdog, Duration timeout) throws IOException {
+        AtomicBoolean expired = new AtomicBoolean();
+        ScheduledFuture<?> deadline = watchdog.schedule(() -> {
+            expired.set(true);
+            closeQuietly(in);
+        }, timeout.toNanos(), TimeUnit.NANOSECONDS);
+        try {
+            long total = copyCapped(in, out, limit, artifact, url);
+            if (expired.get()) {
+                throw timedOut(url, timeout, null);
+            }
+            return total;
+        } catch (HostileArtifactException e) {
+            throw e;
+        } catch (IOException e) {
+            throw expired.get() ? timedOut(url, timeout, e) : e;
+        } finally {
+            deadline.cancel(false);
+        }
+    }
+
     // An artifact over the limit is the package's doing (HostileArtifactException); registry metadata is not.
     private static long copyCapped(InputStream in, OutputStream out, long limit, boolean artifact, URI url) throws IOException {
         byte[] buffer = new byte[64 * 1024];
-        long deadline = System.nanoTime() + TIMEOUT.toNanos();
         long total = 0;
         int read;
         while ((read = in.read(buffer)) != -1) {
@@ -139,12 +178,21 @@ public class ArtifactDownloader {
                 String message = "Body larger than " + limit / (1024 * 1024) + " MB: " + url;
                 throw artifact ? new HostileArtifactException(message, false) : new IOException(message);
             }
-            if (System.nanoTime() > deadline) {
-                throw new IOException("Download slower than " + TIMEOUT.toMinutes() + " min: " + url);
-            }
             out.write(buffer, 0, read);
         }
         return total;
+    }
+
+    private static IOException timedOut(URI url, Duration timeout, @Nullable IOException cause) {
+        return new IOException("Download not finished within " + timeout.toSeconds() + " s: " + url, cause);
+    }
+
+    private static void closeQuietly(InputStream in) {
+        try {
+            in.close();
+        } catch (IOException e) {
+            // nothing to do: the watchdog only needs the blocked read() to return
+        }
     }
 
     private static MessageDigest sha256() {

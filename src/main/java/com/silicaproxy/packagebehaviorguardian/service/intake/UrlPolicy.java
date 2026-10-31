@@ -68,6 +68,26 @@ public class UrlPolicy {
                 .anyMatch(entry -> entry.equals(authority) || entry.endsWith(":*") && entry.equals(host + ":*"));
     }
 
+    /**
+     * Whether the host of an absolute URL is one of {@code entries}, with the semantics of the host
+     * allowlists ({@code host}, {@code host:port}, {@code host:*}).
+     */
+    public static boolean hostMatches(URI uri, List<String> entries) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (uri.getHost() == null) {
+            return false;
+        }
+        String host = uri.getHost().toLowerCase(Locale.ROOT);
+        return isAllowed(host, authority(host, uri.getPort(), scheme), scheme, entries);
+    }
+
+    /** {@code host}, or {@code host:port} for a non-default port: the form the host allowlists use. */
+    public static String authorityOf(URI uri) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        return authority(host, uri.getPort(), scheme);
+    }
+
     private URI require(String url, List<String> allowedHosts, boolean allowHttp, String kind) {
         URI uri;
         try {
@@ -83,10 +103,8 @@ public class UrlPolicy {
         if (uri.getHost() == null || uri.getRawUserInfo() != null) {
             throw new UrlRejectedException("The " + kind + " URL must have a host and no user info");
         }
-        String host = uri.getHost().toLowerCase(Locale.ROOT);
-        String authority = authority(host, uri.getPort(), scheme);
-        if (!isAllowed(host, authority, scheme, allowedHosts)) {
-            throw new UrlRejectedException("The " + kind + " URL host is not allowed: " + authority);
+        if (!hostMatches(uri, allowedHosts)) {
+            throw new UrlRejectedException("The " + kind + " URL host is not allowed: " + authorityOf(uri));
         }
         return uri;
     }

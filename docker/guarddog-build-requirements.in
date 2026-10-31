@@ -1,0 +1,20 @@
+# Installed first in GuardDog's virtualenv: pip itself, and the build dependencies of the sdists
+# without a wheel for Alpaquita's Python (pygit2, yara-python). Those are built with
+# --no-build-isolation, so their build dependencies come from this hash-checked lock, not from an
+# unverified download. cffi must be there: without it pygit2 builds silently without its _libgit2
+# extension. Constrained to the runtime lock, so shared packages keep the same version.
+# Locked with hashes in guarddog-build-requirements.txt.
+#
+# Regenerate both locks (after changing a version here or in guarddog-requirements.in, or to pick
+# up fixes) in the image's own Python: run from the repository root, with the Alpaquita digest of
+# the Dockerfile,
+#   docker run --rm -v "$PWD/docker:/w" -w /w bellsoft/alpaquita-linux-base:stream-glibc@sha256:<digest> sh -c '
+#     apk add --no-cache python3 py3-pip && python3 -m venv /v && /v/bin/pip install pip-tools &&
+#     /v/bin/pip-compile --generate-hashes --allow-unsafe --strip-extras --upgrade guarddog-requirements.in &&
+#     /v/bin/pip-compile --generate-hashes --allow-unsafe --strip-extras --upgrade guarddog-build-requirements.in'
+# then check the diff and rebuild the image (docker build .).
+-c guarddog-requirements.txt
+pip==26.2.2
+setuptools
+wheel
+cffi

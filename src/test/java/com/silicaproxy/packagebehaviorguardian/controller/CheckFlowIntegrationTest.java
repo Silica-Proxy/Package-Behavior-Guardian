@@ -38,7 +38,9 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The whole asynchronous contract with SilicaProxy, against a real database and a fake registry:
@@ -51,6 +53,9 @@ class CheckFlowIntegrationTest extends BaseIntegrationTest {
 
     @LocalServerPort
     private int port;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -273,7 +278,59 @@ class CheckFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    void anUnknownReportIs404() throws IOException, InterruptedException {
+    void anNpmUrlOfAnotherPackageIsRefused() throws IOException, InterruptedException {
+        HttpResponse<String> response = check("left-pad", "1.3.0", "npm",
+                registry.url("/npm/evil-pkg/-/evil-pkg-2.0.0.tgz"), newCallbackUrl());
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body()).contains("The npm URL is not the tarball of left-pad@1.3.0");
+    }
+
+    @Test
+    void aTraversingVersionIsRefused() throws IOException, InterruptedException {
+        HttpResponse<String> response = check("org.example:clean", "..", "maven",
+                registry.url("/maven2/org/example/clean/../clean-...pom"), newCallbackUrl());
+
+        assertThat(response.statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void anUnknownReportIs404()throws IOException, InterruptedException {
         assertThat(report("npm", "never-checked", "1.0.0").statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void spellingsOfAPypiNameShareOneJobAndOneReport() throws IOException, InterruptedException {
+        // localhost:1 is registries.pypi-url in tests: its files are the ones its JSON API describes.
+        String url = "http://localhost:1/packages/Spelled_Name-1.0.tar.gz";
+
+        assertThat(check("Spelled_Name", "1.0", "pypi", url, newCallbackUrl()).statusCode()).isEqualTo(202);
+        assertThat(check("spelled.name", "1.0", "pypi", url, newCallbackUrl()).statusCode()).isEqualTo(202);
+
+        HttpResponse<String> report = report("pypi", "SPELLED-name", "1.0");
+        assertThat(report.statusCode()).isEqualTo(200);
+        assertThat(report.body()).contains("\"name\":\"spelled-name\"");
+        assertThat(jdbcTemplate.queryForList("SELECT name FROM analysis_job WHERE ecosystem = 'pypi' AND lower(name) LIKE 'spelled%'",
+                String.class)).containsExactly("spelled-name");
+    }
+
+    @Test
+    void npmNamesStayCaseSensitive() throws IOException, InterruptedException {
+        HttpResponse<String> response = check("CaseSensitive", "1.0.0", "npm",
+                registry.url("/npm/CaseSensitive/-/CaseSensitive-1.0.0.tgz"), newCallbackUrl());
+
+        assertThat(response.statusCode()).isEqualTo(202);
+        assertThat(report("npm", "CaseSensitive", "1.0.0").statusCode()).isEqualTo(200);
+        assertThat(report("npm", "casesensitive", "1.0.0").statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void aPypiFileOutsideTheConfiguredIndexIsRefused() throws IOException, InterruptedException {
+        // An allowed artifact host, but registries.pypi-url (localhost:1) would list another index's package.
+        HttpResponse<String> response = check("requests", "2.0", "pypi",
+                registry.url("/packages/requests-2.0.tar.gz"), newCallbackUrl());
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body()).contains("is not served by registries.pypi-url");
     }
 }

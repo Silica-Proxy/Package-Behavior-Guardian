@@ -18,6 +18,18 @@ services:
     build:
       context: ..
     restart: unless-stopped
+    # GuardDog and malcontent run under a uid of their job, never as the service (see
+    # docker/scanner-exec.c): the launcher is the image's only file with capabilities, CAP_SETUID and
+    # CAP_SETGID, the only two left to the container. no-new-privileges must stay off here, or the
+    # kernel would ignore them and every scan would fail (jobs FAILED, never a verdict):
+    # scanner-exec sets it on the scanners themselves.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:false
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/packagebehaviorguardian
       - SPRING_DATASOURCE_USERNAME=postgres

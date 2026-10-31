@@ -42,10 +42,14 @@ public class PendingCallbackRepository {
     public record ClaimedCallback(long id, UUID jobId, String callbackUrl, int attempts) {
     }
 
-    public void insertIfAbsent(UUID jobId, String callbackUrl) {
+    /**
+     * Records a callback to send once the job is DONE. A callback already waiting for the same URL gets a
+     * fresh attempt budget: the new request must not inherit the attempts spent for an earlier one.
+     */
+    public void register(UUID jobId, String callbackUrl) {
         jdbcClient.sql("""
                 INSERT INTO pending_callback (job_id, callback_url) VALUES (:jobId, :callbackUrl)
-                ON CONFLICT (job_id, callback_url) DO NOTHING
+                ON CONFLICT (job_id, callback_url) DO UPDATE SET attempts = 0
                 """)
                 .param("jobId", jobId)
                 .param("callbackUrl", callbackUrl)
@@ -75,6 +79,17 @@ public class PendingCallbackRepository {
 
     public void delete(long id) {
         jdbcClient.sql("DELETE FROM pending_callback WHERE id = :id").param("id", id).update();
+    }
+
+    /**
+     * Drops a callback whose attempts are spent, unless {@link #register} gave it a fresh budget since it was
+     * claimed: it is then retried when its claim lease expires.
+     */
+    public void giveUp(long id, int claimedAttempts) {
+        jdbcClient.sql("DELETE FROM pending_callback WHERE id = :id AND attempts = :attempts")
+                .param("id", id)
+                .param("attempts", claimedAttempts)
+                .update();
     }
 
     public void reschedule(long id, Duration delay) {

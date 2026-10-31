@@ -4,7 +4,7 @@
 #   - ecosystem: npm                 # npm | pypi | maven
 #     name: esbuild                  # Maven: groupId:artifactId
 #     version: 0.25.0                # optional: without it, also covers future (possibly compromised) releases
-#     rule-id: GDG-RISK              # optional: every rule when absent
+#     rule-id: GDG-RISK              # optional: every rule when absent; GDG-RISK also covers the GDG-<rule> risks
 #     detail: install hooks          # optional: only findings whose message or location contain it
 #     reason: downloads its platform binary at install, reviewed 2026-10-28
 packagebehaviorguardian:
