@@ -125,7 +125,6 @@ All under `packagebehaviorguardian.*` (see `src/main/resources/application.yaml`
 |---|---|---|---|
 | `security.api-key` | `PACKAGEBEHAVIORGUARDIAN_API_KEY` | — | Key of `POST /v1/check`, also sent on callbacks; blank = refused |
 | `security.report-api-key` | `PACKAGEBEHAVIORGUARDIAN_REPORT_API_KEY` | — | Read-only key of `GET /v1/reports`; blank = refused |
-| `intake.allow-http-callbacks` / `allow-http-artifacts` | `…_INTAKE_ALLOWHTTPCALLBACKS` | `false` / `false` | Plain http for callbacks (SilicaProxy on a private network) / for artifacts (development only) |
 | `intake.allowed-artifact-hosts` | — | npm, PyPI, Maven Central hosts | Exact `host` or `host:port` (`host:*` = any port, for development) |
 | `intake.allowed-callback-hosts` | `PACKAGEBEHAVIORGUARDIAN_CALLBACK_HOSTS` | *(empty)* | SilicaProxy hosts; **empty refuses every check** |
 | `queue.concurrency` / `max-attempts` / `max-wait-minutes` / `max-job-minutes` | `PACKAGEBEHAVIORGUARDIAN_QUEUE_CONCURRENCY` | `4` / `3` / `30` / `30` | Jobs per instance, attempts before FAILED, health threshold, duration after which a job is interrupted and its lease abandoned |

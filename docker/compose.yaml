@@ -43,8 +43,6 @@ services:
       - PACKAGEBEHAVIORGUARDIAN_REPORT_API_KEY=${PBG_REPORT_API_KEY:?PBG_REPORT_API_KEY must be set in .env}
       # host:port of SilicaProxy's callback-base-url, as seen on the Docker network.
       - PACKAGEBEHAVIORGUARDIAN_CALLBACK_HOSTS=${PBG_CALLBACK_HOSTS:-silicaproxy:8080}
-      # The callback goes to SilicaProxy over plain http on the private network; artifacts stay https-only.
-      - PACKAGEBEHAVIORGUARDIAN_INTAKE_ALLOWHTTPCALLBACKS=${PBG_ALLOW_HTTP_CALLBACKS:-true}
       - PACKAGEBEHAVIORGUARDIAN_PUBLIC_BASE_URL=${PBG_PUBLIC_BASE_URL:-}
       # Analyses in parallel per replica: about half the CPUs given to the container.
       - PACKAGEBEHAVIORGUARDIAN_QUEUE_CONCURRENCY=${PBG_CONCURRENCY:-2}

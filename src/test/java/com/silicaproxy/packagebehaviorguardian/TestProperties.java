@@ -45,7 +45,7 @@ public final class TestProperties {
                 new PackageBehaviorGuardianProperties.SecurityProperties(true, "check-key", "report-key"),
                 new PackageBehaviorGuardianProperties.IntakeProperties(
                         List.of("registry.npmjs.org", "files.pythonhosted.org", "silica.internal:8443", "localhost:*"),
-                        List.of("silica.internal"), false, false),
+                        List.of("silica.internal")),
                 new PackageBehaviorGuardianProperties.ArtifactProperties(200, 60, null),
                 registries,
                 new PackageBehaviorGuardianProperties.QueueProperties(4, 3, 60, 30, 30),

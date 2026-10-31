@@ -11,8 +11,6 @@ packagebehaviorguardian:
   intake:
     allowed-artifact-hosts: ["localhost:*"]
     allowed-callback-hosts: ["localhost:*"]
-    allow-http-callbacks: true
-    allow-http-artifacts: true
 
   registries:
     pypi-url: http://localhost:1

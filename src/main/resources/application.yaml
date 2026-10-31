@@ -65,9 +65,6 @@ packagebehaviorguardian:
       - repo.maven.apache.org
     # SilicaProxy instance(s) allowed as callback targets. Empty = every check is refused (fail closed).
     allowed-callback-hosts: ${PACKAGEBEHAVIORGUARDIAN_CALLBACK_HOSTS:}
-    # Plain http:// only for SilicaProxy callbacks on a private network; never for artifacts.
-    allow-http-callbacks: false
-    allow-http-artifacts: false
 
   artifact:
     max-size-mb: 200

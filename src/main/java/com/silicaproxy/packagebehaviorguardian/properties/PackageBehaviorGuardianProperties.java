@@ -58,11 +58,7 @@ public record PackageBehaviorGuardianProperties(
         @DefaultValue List<String> allowedArtifactHosts,
         // Hosts ("host" or "host:port") a callbackUrl may point to: the SilicaProxy instances.
         // Empty refuses every check request (fail closed).
-        @DefaultValue List<String> allowedCallbackHosts,
-        // Accept plain http:// callback URLs: SilicaProxy on a private Docker network.
-        @DefaultValue("false") boolean allowHttpCallbacks,
-        // Accept plain http:// artifact URLs: local development and tests only (MITM otherwise).
-        @DefaultValue("false") boolean allowHttpArtifacts
+        @DefaultValue List<String> allowedCallbackHosts
     ) {}
 
     public record ArtifactProperties(

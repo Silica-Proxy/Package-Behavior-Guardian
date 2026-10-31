@@ -27,7 +27,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Anti-SSRF gate for every URL this service fetches or POSTs to. A URL is accepted only if it is
- * absolute, https (http only when {@code intake.allow-http-callbacks} / {@code allow-http-artifacts}),
+ * absolute, http or https,
  * carries no user info, and its host -- or {@code host:port} for a non-default port -- is exactly
  * one of the configured entries ({@code host:*} accepts any port of that host; meant for local
  * development and tests). Called on the request URLs and again on every redirect hop and every
@@ -44,11 +44,11 @@ public class UrlPolicy {
     }
 
     public URI requireArtifactUrl(String url) {
-        return require(url, properties.allowedArtifactHosts(), properties.allowHttpArtifacts(), "artifact");
+        return require(url, properties.allowedArtifactHosts(), "artifact");
     }
 
     public URI requireCallbackUrl(String url) {
-        return require(url, properties.allowedCallbackHosts(), properties.allowHttpCallbacks(), "callback");
+        return require(url, properties.allowedCallbackHosts(), "callback");
     }
 
     private static String defaultPort(String scheme) {
@@ -88,7 +88,7 @@ public class UrlPolicy {
         return authority(host, uri.getPort(), scheme);
     }
 
-    private URI require(String url, List<String> allowedHosts, boolean allowHttp, String kind) {
+    private URI require(String url, List<String> allowedHosts, String kind) {
         URI uri;
         try {
             uri = new URI(url);
@@ -96,9 +96,9 @@ public class UrlPolicy {
             throw new UrlRejectedException("Malformed " + kind + " URL");
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-        boolean schemeAllowed = "https".equals(scheme) || "http".equals(scheme) && allowHttp;
+        boolean schemeAllowed = "https".equals(scheme) || "http".equals(scheme);
         if (!uri.isAbsolute() || !schemeAllowed) {
-            throw new UrlRejectedException("The " + kind + " URL must be an absolute https URL");
+            throw new UrlRejectedException("The " + kind + " URL must be an absolute http(s) URL");
         }
         if (uri.getHost() == null || uri.getRawUserInfo() != null) {
             throw new UrlRejectedException("The " + kind + " URL must have a host and no user info");

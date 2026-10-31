@@ -42,8 +42,9 @@ class UrlPolicyTest {
     }
 
     @Test
-    void plainHttpIsRefusedUnlessAllowed() {
-        assertThatThrownBy(() -> policy.requireArtifactUrl("http://registry.npmjs.org/x.tgz"))
+    void plainHttpIsAccepted() {
+        assertThat(policy.requireArtifactUrl("http://registry.npmjs.org/x.tgz")).isNotNull();
+        assertThatThrownBy(() -> policy.requireArtifactUrl("ftp://registry.npmjs.org/x.tgz"))
                 .isInstanceOf(UrlRejectedException.class);
     }
 
@@ -51,23 +52,11 @@ class UrlPolicyTest {
     void anEntryNamingTheDefaultPortMeansTheBareHost() {
         UrlPolicy explicitPort = new UrlPolicy(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties(
                 null, new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.IntakeProperties(
-                        java.util.List.of("registry.npmjs.org:443"), java.util.List.of("silicaproxy:80"), true, false),
+                        java.util.List.of("registry.npmjs.org:443"), java.util.List.of("silicaproxy:80")),
                 null, null, null, null, null, null, null, java.util.List.of()));
 
         assertThat(explicitPort.requireArtifactUrl("https://registry.npmjs.org/x.tgz")).isNotNull();
         assertThat(explicitPort.requireCallbackUrl("http://silicaproxy/external-validation/callback/x")).isNotNull();
-    }
-
-    @Test
-    void httpCallbacksDoNotOpenHttpArtifacts() {
-        UrlPolicy httpCallbacks = new UrlPolicy(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties(
-                null, new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.IntakeProperties(
-                        java.util.List.of("registry.npmjs.org"), java.util.List.of("silicaproxy:8080"), true, false),
-                null, null, null, null, null, null, null, java.util.List.of()));
-
-        assertThat(httpCallbacks.requireCallbackUrl("http://silicaproxy:8080/external-validation/callback/x")).isNotNull();
-        assertThatThrownBy(() -> httpCallbacks.requireArtifactUrl("http://registry.npmjs.org/x.tgz"))
-                .isInstanceOf(UrlRejectedException.class);
     }
 
     @Test
