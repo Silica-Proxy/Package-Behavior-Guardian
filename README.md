@@ -139,6 +139,8 @@ Main properties, under `packagebehaviorguardian.*` — every other one is docume
 
 ## Deployment
 
+Pre-built images are available on [Docker Hub](https://hub.docker.com/r/silicaproxy/packagebehaviorguardian).
+
 ```bash
 docker build -t silicaproxy/packagebehaviorguardian .
 cp docker/.env.example docker/.env
