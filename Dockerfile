@@ -155,6 +155,6 @@ EXPOSE 8101
 
 # Default JVM flags; override the whole variable to tune them (e.g. -e JDK_JAVA_OPTIONS="...").
 # 60% of the container memory for the heap: GuardDog and malcontent run beside the JVM.
-ENV JDK_JAVA_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=60.0 -XX:+UseCompactObjectHeaders -XX:+UseStringDeduplication -Dsun.net.inetaddr.ttl=60 -XX:ErrorFile=/app/logs/hs_err_pid%p.log -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs"
+ENV JDK_JAVA_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=60.0 -XX:+UseCompactObjectHeaders -XX:+UseStringDeduplication -Dsun.net.inetaddr.ttl=60 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -XX:ErrorFile=/app/logs/hs_err_pid%p.log -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs"
 
 ENTRYPOINT ["java", "-jar", "packagebehaviorguardian.jar"]
