@@ -53,7 +53,7 @@ class UrlPolicyTest {
         UrlPolicy explicitPort = new UrlPolicy(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties(
                 null, new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.IntakeProperties(
                         java.util.List.of("registry.npmjs.org:443"), java.util.List.of("silicaproxy:80")),
-                null, null, null, null, null, null, null, java.util.List.of()));
+                null, null, null, null, null, null, null, java.util.List.of(), null, null));
 
         assertThat(explicitPort.requireArtifactUrl("https://registry.npmjs.org/x.tgz")).isNotNull();
         assertThat(explicitPort.requireCallbackUrl("http://silicaproxy/external-validation/callback/x")).isNotNull();

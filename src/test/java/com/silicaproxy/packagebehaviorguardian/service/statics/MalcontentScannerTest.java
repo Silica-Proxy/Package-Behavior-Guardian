@@ -66,7 +66,7 @@ class MalcontentScannerTest {
                 defaults.artifact(), defaults.registries(), defaults.queue(), defaults.callback(), defaults.retention(), defaults.analysis(),
                 new ScannerProperties(defaults.scanners().guarddog(), malcontent, defaults.scanners().bytecode(),
                         defaults.scanners().isolation()),
-                defaults.allowlist());
+                defaults.allowlist(), defaults.gitops(), defaults.corporateProxy());
 
         new MalcontentScanner(runner, properties)
                 .scan(new ScanContext("npm", "foo", "1.0.0", List.of(Path.of("/work/job/0-foo.tgz")), Path.of("/work/job")));

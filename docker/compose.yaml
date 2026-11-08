@@ -47,10 +47,25 @@ services:
       # Analyses in parallel per replica: about half the CPUs given to the container.
       - PACKAGEBEHAVIORGUARDIAN_QUEUE_CONCURRENCY=${PBG_CONCURRENCY:-2}
       - LOGGING_LEVEL_COM_SILICAPROXY_PACKAGEBEHAVIORGUARDIAN=${PBG_LOG_LEVEL:-INFO}
-      # Expected behaviors (allowlist.yaml next to this file, reviewed by pull request); applied on restart.
-      - SPRING_CONFIG_IMPORT=optional:file:/config/allowlist.yaml
-    volumes:
-      - ./allowlist.yaml:/config/allowlist.yaml:ro
+      # Expected behaviors, kept in a Git repository reviewed by pull request (GitOps, like SilicaProxy's
+      # company policies): npm.yaml, pypi.yaml, maven.yaml under PBG_GITOPS_PATH. One replica fetches it
+      # every PBG_GITOPS_SYNC_INTERVAL_MINUTES, every replica applies it within 30 s.
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_ENABLED=${PBG_GITOPS_ENABLED:-false}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_REPOSITORY_URL=${PBG_GITOPS_REPOSITORY_URL:-}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_BRANCH=${PBG_GITOPS_BRANCH:-}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_PATH=${PBG_GITOPS_PATH:-}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_USERNAME=${PBG_GITOPS_USERNAME:-oauth2}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_TOKEN=${PBG_GITOPS_TOKEN:-}
+      - PACKAGEBEHAVIORGUARDIAN_GITOPS_SYNC_INTERVAL_MINUTES=${PBG_GITOPS_SYNC_INTERVAL_MINUTES:-10}
+      # Outbound proxy of the company network: registries through it by default, the Git repository
+      # and SilicaProxy callbacks direct (internal traffic) unless their scope is turned on.
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_ENABLED=${PBG_CORPORATE_PROXY_ENABLED:-false}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_HOST=${PBG_CORPORATE_PROXY_HOST:-}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_PORT=${PBG_CORPORATE_PROXY_PORT:-8080}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_NON_PROXY_HOSTS=${PBG_CORPORATE_PROXY_NON_PROXY_HOSTS:-localhost|127.0.0.1|silicaproxy|postgres}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_REGISTRIES=${PBG_CORPORATE_PROXY_SCOPE_REGISTRIES:-true}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_GIT_REPOSITORY=${PBG_CORPORATE_PROXY_SCOPE_GIT_REPOSITORY:-false}
+      - PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_CALLBACKS=${PBG_CORPORATE_PROXY_SCOPE_CALLBACKS:-false}
     deploy:
       replicas: ${PBG_REPLICAS:-2}
       resources:

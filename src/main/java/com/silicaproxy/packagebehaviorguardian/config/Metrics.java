@@ -36,6 +36,7 @@ public final class Metrics {
     public static final String TAG_SCANNER = "scanner";
     public static final String TAG_RESULT = "result";
     public static final String TAG_STAGE = "stage";
+    public static final String TAG_OUTCOME = "outcome";
 
     public static final String STAGE_RESOLVE = "resolve";
     public static final String STAGE_DOWNLOAD = "download";
@@ -60,4 +61,10 @@ public final class Metrics {
     public static final String RESULT_DELIVERED = "DELIVERED";
     public static final String RESULT_GONE = "GONE";
     public static final String RESULT_RETRY = "RETRY";
+
+    public static final String ALLOWLIST_ENTRIES_METRIC = "packagebehaviorguardian.allowlist.entries";
+    public static final String GITOPS_SYNC_METRIC = "packagebehaviorguardian.gitops.sync";
+    public static final String GITOPS_AGE_METRIC = "packagebehaviorguardian.gitops.age.seconds";
+    public static final String OUTCOME_SUCCESS = "success";
+    public static final String OUTCOME_FAILURE = "failure";
 }

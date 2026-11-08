@@ -52,7 +52,7 @@ class ScratchDirectoriesTest {
                 defaults.analysis(),
                 new ScannerProperties(scanners.guarddog(), scanners.malcontent(), scanners.bytecode(),
                         new IsolationProperties(firstGid, slots)),
-                defaults.allowlist()));
+                defaults.allowlist(), defaults.gitops(), defaults.corporateProxy()));
     }
 
     private int ownGid() throws IOException {

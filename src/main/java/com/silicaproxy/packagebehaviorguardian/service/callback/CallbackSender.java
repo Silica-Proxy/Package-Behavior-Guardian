@@ -19,6 +19,7 @@ package com.silicaproxy.packagebehaviorguardian.service.callback;
 
 import com.silicaproxy.packagebehaviorguardian.model.dto.CallbackPayload;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
+import com.silicaproxy.packagebehaviorguardian.config.HttpClientConfig;
 import com.silicaproxy.packagebehaviorguardian.service.intake.UrlPolicy;
 import com.silicaproxy.packagebehaviorguardian.service.intake.UrlRejectedException;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.time.Duration;
 import org.jspecify.annotations.NullMarked;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,7 +58,7 @@ public class CallbackSender {
 
     private final String apiKey;
 
-    public CallbackSender(UrlPolicy urlPolicy, HttpClient httpClient, ObjectMapper objectMapper,
+    public CallbackSender(UrlPolicy urlPolicy, @Qualifier(HttpClientConfig.CALLBACK_CLIENT) HttpClient httpClient, ObjectMapper objectMapper,
             PackageBehaviorGuardianProperties properties) {
         this.urlPolicy = urlPolicy;
         this.httpClient = httpClient;

@@ -146,7 +146,7 @@ class ScanCacheIntegrationTest extends BaseIntegrationTest {
         return new PackageBehaviorGuardianProperties(defaults.security(), defaults.intake(), defaults.artifact(),
                 defaults.registries(), defaults.queue(), defaults.callback(), defaults.retention(),
                 new PackageBehaviorGuardianProperties.AnalysisProperties(ruleSetVersion, null, 2, cacheEnabled, 30, 40, 20, 60),
-                defaults.scanners(), defaults.allowlist());
+                defaults.scanners(), defaults.allowlist(), defaults.gitops(), defaults.corporateProxy());
     }
 
     /** Reports like the GuardDog parser: the file's local name at the start of each location. */

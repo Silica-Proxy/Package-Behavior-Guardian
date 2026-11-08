@@ -39,8 +39,85 @@ public record PackageBehaviorGuardianProperties(
     @DefaultValue RetentionProperties retention,
     AnalysisProperties analysis,
     ScannerProperties scanners,
-    @DefaultValue List<AllowlistEntry> allowlist
+    @DefaultValue List<AllowlistEntry> allowlist,
+    @DefaultValue GitOpsProperties gitops,
+    @DefaultValue CorporateProxyProperties corporateProxy
 ) {
+
+    /**
+     * Outbound HTTP(S) proxy of the company network, as in SilicaProxy: once {@code enabled}, each
+     * category of outgoing traffic goes through it or not ({@code scope}), except to the hosts of
+     * {@code non-proxy-hosts} ("|"-separated, "*" wildcards, e.g. {@code localhost|*.corp.local}).
+     * No proxy authentication.
+     */
+    public record CorporateProxyProperties(
+        @DefaultValue("false") boolean enabled,
+        @Nullable String host,
+        @DefaultValue("8080") int port,
+        @DefaultValue("localhost|127.0.0.1") String nonProxyHosts,
+        @DefaultValue CorporateProxyScope scope
+    ) {
+
+        public CorporateProxyProperties {
+            if (enabled && (host == null || host.isBlank() || port < 1 || port > 65_535)) {
+                throw new IllegalArgumentException("corporate-proxy: host and a port in 1-65535 are required when enabled");
+            }
+        }
+    }
+
+    public record CorporateProxyScope(
+        // Public registries: artifacts and PyPI metadata (npm, PyPI, Maven Central).
+        @DefaultValue("true") boolean registries,
+        // The GitOps allowlist repository: usually inside the company network.
+        @DefaultValue("false") boolean gitRepository,
+        // Callbacks to SilicaProxy: usually inside the company network.
+        @DefaultValue("false") boolean callbacks
+    ) {}
+
+    /**
+     * Allowlist entries kept in a Git repository (see {@code service.allowlist}): one instance at a
+     * time fetches {@code branch} (blank = the remote HEAD) of {@code repository-url} every {@code
+     * sync-interval-minutes} and reads {@code npm.yaml}, {@code pypi.yaml} and {@code maven.yaml} (or
+     * {@code .yml}) under {@code path}; every instance reloads them within {@code
+     * refresh-interval-seconds}. They apply together with the static {@code allowlist}.
+     */
+    public record GitOpsProperties(
+        @DefaultValue("false") boolean enabled,
+        @Nullable String repositoryUrl,
+        @Nullable String branch,
+        // Directory of the repository holding the files; blank = its root. Relative, no "..".
+        @DefaultValue("") String path,
+        // HTTPS credentials of a private repository: a token, sent with this user name.
+        @DefaultValue("oauth2") String username,
+        @Nullable String token,
+        // Local working copy, owned by this service. Blank = <java.io.tmpdir>/pbg-allowlist-git.
+        @Nullable Path cloneDir,
+        @DefaultValue("10") int syncIntervalMinutes,
+        @DefaultValue("30") int refreshIntervalSeconds,
+        // gitops health turns DEGRADED when the last successful synchronization is older than this.
+        @DefaultValue("60") int maxAgeMinutes
+    ) {
+
+        public GitOpsProperties {
+            if (enabled && (repositoryUrl == null || repositoryUrl.isBlank())) {
+                throw new IllegalArgumentException("gitops.repository-url is required when gitops.enabled is true");
+            }
+            if (syncIntervalMinutes < 1 || refreshIntervalSeconds < 1 || maxAgeMinutes < 1) {
+                throw new IllegalArgumentException("gitops: sync-interval-minutes, refresh-interval-seconds and"
+                        + " max-age-minutes must be >= 1");
+            }
+            Path relative = Path.of(path);
+            if (relative.isAbsolute() || relative.normalize().startsWith("..")) {
+                throw new IllegalArgumentException("gitops.path must be a directory inside the repository: " + path);
+            }
+        }
+
+        /** The local working copy. */
+        public Path effectiveCloneDir() {
+            return cloneDir != null && !cloneDir.toString().isBlank()
+                    ? cloneDir : Path.of(System.getProperty("java.io.tmpdir"), "pbg-allowlist-git");
+        }
+    }
 
     public record SecurityProperties(
         // Set to false only for local dev / tests: every endpoint becomes unauthenticated.
@@ -219,9 +296,9 @@ public record PackageBehaviorGuardianProperties(
 
     /**
      * An expected behavior of one package (e.g. {@code esbuild} downloading its binary), set aside
-     * from its verdict. Declared in configuration -- typically a versioned file reviewed by pull
-     * request, imported with {@code spring.config.import} -- and applied on restart, also to versions
-     * already analyzed. {@code ruleId} null = every rule; {@code GDG-RISK} also covers the {@code
+     * from its verdict. Kept in a Git repository ({@link GitOpsProperties}, applied on the next
+     * synchronization) or declared in configuration (applied on restart), also to versions already
+     * analyzed. {@code ruleId} null = every rule; {@code GDG-RISK} also covers the {@code
      * GDG-<threat rule>} findings GuardDog's rating is made of, which count since rule set 2;
      * {@code detail}, when set, restricts the entry to findings whose message or location contains
      * it; {@code version}, when set, to that exact version -- an entry without version also covers
