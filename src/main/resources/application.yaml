@@ -147,6 +147,10 @@ packagebehaviorguardian:
       enabled: true
       command: [guarddog]
       timeout-seconds: 300
+      # Kernel sandbox of GuardDog (Landlock): required by default, every npm/PyPI scan fails with
+      # "Kernel-level sandbox is not available" where the container gets no Landlock. false =
+      # --no-sandbox, only on such hosts (scanner-exec's per-job uid still applies).
+      sandbox: ${PACKAGEBEHAVIORGUARDIAN_SCANNERS_GUARDDOG_SANDBOX:true}
     malcontent:
       enabled: true
       command: [mal]

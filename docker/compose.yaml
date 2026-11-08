@@ -47,6 +47,8 @@ services:
       # Analyses in parallel per replica: about half the CPUs given to the container.
       - PACKAGEBEHAVIORGUARDIAN_QUEUE_CONCURRENCY=${PBG_CONCURRENCY:-2}
       - LOGGING_LEVEL_COM_SILICAPROXY_PACKAGEBEHAVIORGUARDIAN=${PBG_LOG_LEVEL:-INFO}
+      # GuardDog's Landlock sandbox: false (--no-sandbox) only on hosts without Landlock (see README).
+      - PACKAGEBEHAVIORGUARDIAN_SCANNERS_GUARDDOG_SANDBOX=${PBG_GUARDDOG_SANDBOX:-true}
       # Expected behaviors, kept in a Git repository reviewed by pull request (GitOps, like SilicaProxy's
       # company policies): npm.yaml, pypi.yaml, maven.yaml under PBG_GITOPS_PATH. One replica fetches it
       # every PBG_GITOPS_SYNC_INTERVAL_MINUTES, every replica applies it within 30 s.
