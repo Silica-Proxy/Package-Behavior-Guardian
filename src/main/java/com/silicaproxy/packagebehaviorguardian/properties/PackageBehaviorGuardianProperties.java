@@ -246,7 +246,7 @@ public record PackageBehaviorGuardianProperties(
     }
 
     public record ScannerProperties(
-        ToolProperties guarddog,
+        GuardDogProperties guarddog,
         MalcontentProperties malcontent,
         BytecodeProperties bytecode,
         IsolationProperties isolation
@@ -272,10 +272,16 @@ public record PackageBehaviorGuardianProperties(
         }
     }
 
-    public record ToolProperties(
+    public record GuardDogProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue("guarddog") List<String> command,
-        @DefaultValue("300") int timeoutSeconds
+        @DefaultValue("300") int timeoutSeconds,
+        // GuardDog (3.2+) extracts and scans each artifact under a kernel sandbox (Landlock on
+        // Linux): no network, filesystem limited to the artifact and its temp directory. It refuses
+        // to scan where the container gets no Landlock (kernel < 5.13, landlock missing from the
+        // kernel's lsm= list, a seccomp profile without the landlock_* syscalls, gVisor). false
+        // passes --no-sandbox: the per-job uid of scanner-exec remains, the network block does not.
+        @DefaultValue("true") boolean sandbox
     ) {}
 
     public record MalcontentProperties(

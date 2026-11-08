@@ -71,7 +71,7 @@ public final class TestProperties {
                 new PackageBehaviorGuardianProperties.RetentionProperties(90, 365, 365),
                 new PackageBehaviorGuardianProperties.AnalysisProperties("1", "https://pbg.internal/", 2, true, 30, 40, 20, 60),
                 new PackageBehaviorGuardianProperties.ScannerProperties(
-                        new PackageBehaviorGuardianProperties.ToolProperties(true, List.of("guarddog"), 300),
+                        new PackageBehaviorGuardianProperties.GuardDogProperties(true, List.of("guarddog"), 300, true),
                         new PackageBehaviorGuardianProperties.MalcontentProperties(true, List.of("mal"), 300, false),
                         new PackageBehaviorGuardianProperties.BytecodeProperties(true, List.of("org.projectlombok")),
                         new PackageBehaviorGuardianProperties.IsolationProperties(null, 64)),

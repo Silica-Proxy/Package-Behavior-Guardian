@@ -167,6 +167,8 @@ Replicas are identical and stateless (queue in PostgreSQL, `SKIP LOCKED`), so th
 
 **Scanner isolation** — in the image, GuardDog and malcontent run under a per-job unprivileged user, without the service's secrets (`docker/scanner-exec.c`). Keep `no-new-privileges` **off** on the container, or every scan fails.
 
+**GuardDog sandbox** — GuardDog also extracts and scans each npm/PyPI artifact under a Landlock sandbox (no network, filesystem limited to the artifact). It needs Linux ≥ 5.13 with `landlock` in the kernel's active LSMs, and a seccomp profile that allows the `landlock_*` syscalls (Docker's default does; gVisor and some older Kubernetes/containerd profiles don't). Otherwise every npm/PyPI analysis fails with `Kernel-level sandbox is not available on this platform`. Check on the host with `cat /sys/kernel/security/lsm`. If you can't enable it, set `PACKAGEBEHAVIORGUARDIAN_SCANNERS_GUARDDOG_SANDBOX=false`: the per-job uid isolation remains, the network block doesn't.
+
 Give the containers no network access beyond PostgreSQL, the registries and SilicaProxy.
 
 **Licenses** — `./gradlew check` verifies every dependency license (`config/allowed-licenses.json`). malcontent always runs with `--third-party=false`. See `NOTICE`.

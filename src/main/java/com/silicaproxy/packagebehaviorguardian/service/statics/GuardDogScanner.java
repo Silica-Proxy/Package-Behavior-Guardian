@@ -19,7 +19,7 @@ package com.silicaproxy.packagebehaviorguardian.service.statics;
 
 import com.silicaproxy.packagebehaviorguardian.model.entity.Finding;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
-import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.ToolProperties;
+import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties.GuardDogProperties;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -28,13 +28,13 @@ import java.util.List;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.stereotype.Component;
 
-/** GuardDog (Datadog, Apache-2.0) on each npm/PyPI artifact: {@code guarddog <ecosystem> scan <file> --output-format json}. */
+/** GuardDog (Datadog, Apache-2.0) on each npm/PyPI artifact: {@code guarddog <ecosystem> scan <file> --output-format json [--no-sandbox]}. */
 @Component
 @NullMarked
 public class GuardDogScanner implements FileScanner {
 
     private final ProcessRunner processRunner;
-    private final ToolProperties properties;
+    private final GuardDogProperties properties;
 
     public GuardDogScanner(ProcessRunner processRunner, PackageBehaviorGuardianProperties properties) {
         this.processRunner = processRunner;
@@ -66,6 +66,9 @@ public class GuardDogScanner implements FileScanner {
     public List<Finding> scanFile(String ecosystem, Path artifact, Path workDir) throws IOException {
         List<String> command = new ArrayList<>(properties.command());
         command.addAll(List.of(ecosystem, "scan", artifact.toString(), "--output-format", "json"));
+        if (!properties.sandbox()) {
+            command.add("--no-sandbox");
+        }
         return GuardDogReportParser.parse(
                 processRunner.runForJsonReport(command, Duration.ofSeconds(properties.timeoutSeconds()), workDir),
                 String.valueOf(artifact.getFileName()));
