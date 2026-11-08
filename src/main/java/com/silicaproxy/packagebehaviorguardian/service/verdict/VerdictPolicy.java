@@ -34,9 +34,9 @@ import org.jspecify.annotations.NullMarked;
 import org.springframework.stereotype.Component;
 
 /**
- * Findings to verdict. Findings covered by the configured allowlist are set aside first. Then one
- * CRITICAL blocks; otherwise HIGH and MEDIUM findings add up (weights {@code analysis.high-weight},
- * {@code medium-weight}, default 40 and 20) -- each rule once, at its
+ * Findings to verdict. Findings covered by the allowlist in force (configuration and GitOps) are
+ * set aside first. Then one CRITICAL blocks; otherwise HIGH and MEDIUM findings add up (weights
+ * {@code analysis.high-weight}, {@code medium-weight}, default 40 and 20) -- each rule once, at its
  * highest severity, so that one behavior repeated in ten methods does not outweigh two distinct
  * behaviors -- and a score of {@code analysis.block-threshold} (default 60) or more blocks with
  * "manual review required". So a HIGH signal corroborated by another rule (HIGH + MEDIUM, a GuardDog
@@ -53,15 +53,15 @@ public class VerdictPolicy {
 
     private static final String GUARDDOG_RULE_PREFIX = "GDG-";
 
-    private final List<AllowlistEntry> allowlist;
+    private final AllowlistSource allowlist;
     private final String ruleSetVersion;
     private final ReportLinks reportLinks;
     private final int highWeight;
     private final int mediumWeight;
     private final int blockThreshold;
 
-    public VerdictPolicy(PackageBehaviorGuardianProperties properties, ReportLinks reportLinks) {
-        this.allowlist = List.copyOf(properties.allowlist());
+    public VerdictPolicy(PackageBehaviorGuardianProperties properties, ReportLinks reportLinks, AllowlistSource allowlist) {
+        this.allowlist = allowlist;
         this.ruleSetVersion = properties.analysis().ruleSetVersion();
         this.reportLinks = reportLinks;
         this.highWeight = properties.analysis().highWeight();
@@ -72,8 +72,9 @@ public class VerdictPolicy {
     public Decision decide(String ecosystem, String name, String version, List<Finding> findings) {
         List<Finding> counted = new ArrayList<>();
         List<Finding> allowlisted = new ArrayList<>();
+        List<AllowlistEntry> entries = allowlist.entries();
         for (Finding finding : findings) {
-            (allowlist.stream().anyMatch(entry -> entry.covers(ecosystem, name, version, finding)) ? allowlisted : counted).add(finding);
+            (entries.stream().anyMatch(entry -> entry.covers(ecosystem, name, version, finding)) ? allowlisted : counted).add(finding);
         }
         // GuardDog's rating is made of its risks: once one of them is not allowlisted (a threat that
         // appeared after the entry was written), the rating counts again, whatever the entry's detail matched.

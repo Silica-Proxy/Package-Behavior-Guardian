@@ -34,7 +34,7 @@ class VerdictPolicyTest {
     private final VerdictPolicy policy = policy(TestProperties.defaults());
 
     private static VerdictPolicy policy(PackageBehaviorGuardianProperties properties) {
-        return new VerdictPolicy(properties, new ReportLinks(properties));
+        return new VerdictPolicy(properties, new ReportLinks(properties), properties::allowlist);
     }
 
     private static Finding finding(String ruleId, Severity severity, String message) {

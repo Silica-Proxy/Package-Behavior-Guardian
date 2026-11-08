@@ -55,4 +55,9 @@ public class HealthIndicatorsConfig {
     public HealthIndicator analysisQueueHealthIndicator(MonitoringService monitoringService) {
         return () -> toHealth(monitoringService.queueHealth());
     }
+
+    @Bean
+    public HealthIndicator gitopsHealthIndicator(MonitoringService monitoringService) {
+        return () -> toHealth(monitoringService.gitopsHealth());
+    }
 }

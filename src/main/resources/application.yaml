@@ -171,16 +171,56 @@ packagebehaviorguardian:
         - jakarta
         - org.checkerframework
 
-  # Expected behaviors, set aside from a package's verdict. Keep them in a versioned file reviewed by
-  # pull request and import it, e.g. SPRING_CONFIG_IMPORT=optional:file:/config/allowlist.yaml:
-  #   packagebehaviorguardian:
+  # Expected behaviors, set aside from a package's verdict, kept in a Git repository reviewed by pull
+  # request (GitOps, as SilicaProxy's company policies): one instance at a time fetches it every
+  # sync-interval-minutes and every instance applies the new entries within refresh-interval-seconds,
+  # also to versions already analyzed. Files, under `path` in the repository (ecosystem = file name):
+  #   npm.yaml / pypi.yaml / maven.yaml  (or .yml)
   #     allowlist:
-  #       - ecosystem: npm
-  #         name: esbuild
-  #         version: 0.25.0        # optional: without it, also covers future (possibly compromised) releases
-  #         rule-id: GDG-RISK          # optional: every rule when absent; GDG-RISK also covers the GDG-<rule> risks
-  #         detail: install hooks      # optional: only findings whose message/location contain it
+  #       - name: esbuild                # Maven: groupId:artifactId
+  #         version: 0.25.0              # optional: without it, also covers future (possibly compromised) releases
+  #         rule-id: GDG-RISK            # optional: every rule when absent; GDG-RISK also covers the GDG-<rule> risks
+  #         detail: install hooks        # optional: only findings whose message/location contain it
   #         reason: downloads its platform binary at install, reviewed 2026-10-28
+  # An invalid entry (unknown key, no name or reason) is skipped; an unreadable file or a fetch failure
+  # keeps the entries in force. Both turn the `gitops` health DEGRADED.
+  gitops:
+    enabled: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_ENABLED:false}
+    # HTTPS URL; credentials go in token, never in the URL.
+    repository-url: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_REPOSITORY_URL:}
+    # Blank = the default branch (remote HEAD).
+    branch: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_BRANCH:}
+    # Directory of the repository holding the files, e.g. "package-behavior-guardian" to share
+    # SilicaProxy's policy repository. Blank = the root.
+    path: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_PATH:}
+    username: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_USERNAME:oauth2}
+    token: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_TOKEN:}
+    # Local working copy. Blank = <java.io.tmpdir>/pbg-allowlist-git.
+    clone-dir: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_CLONE_DIR:}
+    sync-interval-minutes: ${PACKAGEBEHAVIORGUARDIAN_GITOPS_SYNC_INTERVAL_MINUTES:10}
+    refresh-interval-seconds: 30
+    # gitops health turns DEGRADED when the last successful synchronization is older than this.
+    max-age-minutes: 60
+
+  # Outbound proxy of the company network (same settings as SilicaProxy's corporate-proxy). Each
+  # category of outgoing traffic goes through it or not; hosts of non-proxy-hosts are always direct.
+  # A category in scope fails when the proxy is unreachable: it never silently goes direct.
+  corporate-proxy:
+    enabled: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_ENABLED:false}
+    host: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_HOST:}
+    port: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_PORT:8080}
+    # "|"-separated host names, "*" wildcards, e.g. "localhost|127.0.0.1|*.corp.local"
+    non-proxy-hosts: "${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_NON_PROXY_HOSTS:localhost|127.0.0.1}"
+    scope:
+      # Public registries: artifacts and PyPI metadata (npm, PyPI, Maven Central)
+      registries: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_REGISTRIES:true}
+      # GitOps allowlist repository: usually inside the company network
+      git-repository: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_GIT_REPOSITORY:false}
+      # Callbacks to SilicaProxy: usually inside the company network
+      callbacks: ${PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_CALLBACKS:false}
+
+  # Static entries (same fields, plus ecosystem), applied on restart together with the GitOps ones:
+  # for local development and tests; prefer the Git repository in production.
   allowlist: []
 
 server:

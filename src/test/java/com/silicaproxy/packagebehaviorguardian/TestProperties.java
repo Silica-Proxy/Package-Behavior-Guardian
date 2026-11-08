@@ -39,6 +39,13 @@ public final class TestProperties {
         return build(List.of(), registries);
     }
 
+    public static PackageBehaviorGuardianProperties withCorporateProxy(
+            PackageBehaviorGuardianProperties.CorporateProxyProperties corporateProxy) {
+        PackageBehaviorGuardianProperties d = defaults();
+        return new PackageBehaviorGuardianProperties(d.security(), d.intake(), d.artifact(), d.registries(), d.queue(),
+                d.callback(), d.retention(), d.analysis(), d.scanners(), d.allowlist(), d.gitops(), corporateProxy);
+    }
+
     public static PackageBehaviorGuardianProperties withScale(int highWeight, int mediumWeight, int blockThreshold) {
         PackageBehaviorGuardianProperties d = defaults();
         PackageBehaviorGuardianProperties.AnalysisProperties a = d.analysis();
@@ -47,7 +54,7 @@ public final class TestProperties {
                 new PackageBehaviorGuardianProperties.AnalysisProperties(a.ruleSetVersion(), a.publicBaseUrl(),
                         a.scanParallelism(), a.scanCacheEnabled(), a.scanCacheMaxAgeDays(), highWeight, mediumWeight,
                         blockThreshold),
-                d.scanners(), d.allowlist());
+                d.scanners(), d.allowlist(), d.gitops(), d.corporateProxy());
     }
 
     private static PackageBehaviorGuardianProperties build(List<AllowlistEntry> allowlist,
@@ -68,6 +75,9 @@ public final class TestProperties {
                         new PackageBehaviorGuardianProperties.MalcontentProperties(true, List.of("mal"), 300, false),
                         new PackageBehaviorGuardianProperties.BytecodeProperties(true, List.of("org.projectlombok")),
                         new PackageBehaviorGuardianProperties.IsolationProperties(null, 64)),
-                allowlist);
+                allowlist,
+                new PackageBehaviorGuardianProperties.GitOpsProperties(false, null, null, "", "oauth2", null, null, 10, 30, 60),
+                new PackageBehaviorGuardianProperties.CorporateProxyProperties(false, null, 8080, "localhost|127.0.0.1",
+                        new PackageBehaviorGuardianProperties.CorporateProxyScope(true, false, false)));
     }
 }

@@ -17,9 +17,11 @@
 
 package com.silicaproxy.packagebehaviorguardian.service.monitoring;
 
+import com.silicaproxy.packagebehaviorguardian.dao.repository.AllowlistRepository.SyncState;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.AnalysisJobRepository;
 import com.silicaproxy.packagebehaviorguardian.dao.repository.HealthCheckRepository;
 import com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties;
+import com.silicaproxy.packagebehaviorguardian.service.allowlist.AllowlistStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -32,7 +34,9 @@ import org.springframework.stereotype.Service;
 /**
  * Aggregates the health of packagebehaviorguardian (database, analysis queue) into UP / DOWN /
  * DEGRADED. The queue is DEGRADED when its oldest PENDING job waited longer than {@code
- * queue.max-wait-minutes}: verdicts would then arrive after SilicaProxy's pending TTL.
+ * queue.max-wait-minutes}: verdicts would then arrive after SilicaProxy's pending TTL. The GitOps
+ * allowlist is DEGRADED when its last synchronization failed, skipped invalid entries or is older
+ * than {@code gitops.max-age-minutes}: the entries in force may then not be the repository's.
  */
 @Service
 @NullMarked
@@ -41,12 +45,14 @@ public class MonitoringService {
     private final HealthCheckRepository healthCheckRepository;
     private final AnalysisJobRepository jobRepository;
     private final PackageBehaviorGuardianProperties properties;
+    private final AllowlistStore allowlistStore;
 
     public MonitoringService(HealthCheckRepository healthCheckRepository, AnalysisJobRepository jobRepository,
-            PackageBehaviorGuardianProperties properties) {
+            PackageBehaviorGuardianProperties properties, AllowlistStore allowlistStore) {
         this.healthCheckRepository = healthCheckRepository;
         this.jobRepository = jobRepository;
         this.properties = properties;
+        this.allowlistStore = allowlistStore;
     }
 
     public record ComponentHealth(String status, Map<String, Object> details) {
@@ -65,6 +71,7 @@ public class MonitoringService {
         Map<String, ComponentHealth> components = new HashMap<>();
         components.put("database", databaseHealth());
         components.put("analysisQueue", queueHealth());
+        components.put("gitops", gitopsHealth());
         String overallStatus = "UP";
         for (ComponentHealth component : components.values()) {
             overallStatus = worseOf(overallStatus, component.status());
@@ -107,5 +114,37 @@ public class MonitoringService {
             details.put("error", String.valueOf(e.getMessage()));
             return new ComponentHealth("DOWN", details);
         }
+    }
+
+    public ComponentHealth gitopsHealth() {
+        Map<String, Object> details = new HashMap<>();
+        details.put("enabled", allowlistStore.gitopsEnabled());
+        details.put("entriesInForce", allowlistStore.entries().size());
+        if (!allowlistStore.gitopsEnabled()) {
+            return new ComponentHealth("UP", details);
+        }
+        SyncState state = allowlistStore.state();
+        if (state == null) {
+            details.put("message", "GitOps allowlist not loaded from the database yet");
+            return new ComponentHealth("DEGRADED", details);
+        }
+        details.put("revision", String.valueOf(state.revision()));
+        details.put("entries", state.entries());
+        details.put("skipped", state.skipped());
+        String lastError = state.lastError();
+        if (lastError != null) {
+            details.put("lastError", lastError);
+        }
+        Instant syncedAt = state.syncedAt();
+        if (syncedAt == null) {
+            details.put("message", "First synchronization pending");
+            return new ComponentHealth(lastError == null ? "UP" : "DEGRADED", details);
+        }
+        long ageMinutes = Duration.between(syncedAt, Instant.now()).toMinutes();
+        details.put("syncedAt", syncedAt.toString());
+        details.put("ageMinutes", ageMinutes);
+        boolean degraded = lastError != null || state.skipped() > 0
+                || ageMinutes > properties.gitops().maxAgeMinutes();
+        return new ComponentHealth(degraded ? "DEGRADED" : "UP", details);
     }
 }

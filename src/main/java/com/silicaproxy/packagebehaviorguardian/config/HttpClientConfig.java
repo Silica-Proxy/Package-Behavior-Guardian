@@ -17,27 +17,42 @@
 
 package com.silicaproxy.packagebehaviorguardian.config;
 
+import java.net.ProxySelector;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
- * The single outbound {@link HttpClient} (registry downloads and callbacks). Redirects are never
- * followed automatically: {@code ArtifactDownloader} follows them by hand so that every hop is
- * re-checked against {@code ArtifactUrlPolicy} -- an automatic redirect would let an allowed host
- * bounce a request to an internal address (SSRF).
+ * One client per category of outgoing traffic, each with its own route ({@link CorporateProxy}):
+ * registries ({@value #REGISTRY_CLIENT}, the default one) and SilicaProxy callbacks ({@value #CALLBACK_CLIENT}).
+ * Redirects are never followed by the client: each hop is checked against the host allowlists.
  */
 @Configuration
 @NullMarked
 public class HttpClientConfig {
 
-    @Bean
-    public HttpClient outboundHttpClient() {
+    public static final String REGISTRY_CLIENT = "registryHttpClient";
+    public static final String CALLBACK_CLIENT = "callbackHttpClient";
+
+    @Bean(REGISTRY_CLIENT)
+    @Primary
+    public HttpClient registryHttpClient(CorporateProxy corporateProxy) {
+        return client(corporateProxy.registries());
+    }
+
+    @Bean(CALLBACK_CLIENT)
+    public HttpClient callbackHttpClient(CorporateProxy corporateProxy) {
+        return client(corporateProxy.callbacks());
+    }
+
+    static HttpClient client(ProxySelector route) {
         return HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(10))
+                .proxy(route)
                 .build();
     }
 }

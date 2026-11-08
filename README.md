@@ -83,20 +83,29 @@ POST /v1/check
   "callbackUrl": "https://silica.internal/external-validation/callback/0b6c…" }
 ```
 
-**Allowlist** — expected behaviors, in a reviewed file (`docker/allowlist.yaml`):
+### Allowlist (GitOps)
+
+Expected behaviors live in a **Git repository reviewed by pull request**, as SilicaProxy's company policies — it can be the same repository, with the files in their own directory. One file per ecosystem, `npm.yaml`, `pypi.yaml`, `maven.yaml` (or `.yml`), under `gitops.path` (examples in `docker/allowlist-repository-example/`):
 
 ```yaml
-packagebehaviorguardian:
-  allowlist:
-    - ecosystem: npm
-      name: esbuild
-      version: 0.25.0          # optional: without it, future releases are covered too
-      rule-id: GDG-RISK        # optional
-      detail: install hooks    # optional: substring of the finding
-      reason: downloads its platform binary at install, reviewed 2026-10-28
+allowlist:
+  - name: esbuild              # Maven: groupId:artifactId
+    version: 0.25.0            # optional: without it, future releases are covered too
+    rule-id: GDG-RISK          # optional: every rule when absent
+    detail: install hooks      # optional: substring of the finding
+    reason: downloads its platform binary at install, reviewed 2026-10-28
 ```
 
-Entries apply on restart, to versions already analyzed too.
+- One instance at a time (ShedLock) fetches the branch every `sync-interval-minutes` (10) and replaces the `allowlist_entry` table; every instance reloads it within `refresh-interval-seconds` (30). A merged change applies to the next `/v1/check`, callback and report, versions already analyzed included. SilicaProxy keeps the verdicts it already holds for its `cache-ttl-minutes`: release a package at once with a SilicaProxy GitOps policy.
+- **Fail-safe**: an invalid entry (unknown key — a misspelt `rule-id` would cover every rule —, missing `name` or `reason`, blank value) is skipped; an unreadable file, a missing directory or a failed fetch keeps the entries in force. All of them turn the `gitops` health **DEGRADED**, as does a last success older than `max-age-minutes` (60).
+- A force-pushed branch is followed (fetch depth 1 then hard reset); symbolic links leaving the directory and files over 1 MiB are refused.
+- Metrics: `packagebehaviorguardian.gitops.sync{outcome}`, `packagebehaviorguardian.gitops.age.seconds`, `packagebehaviorguardian.allowlist.entries`.
+
+### Corporate proxy
+
+As in SilicaProxy, `corporate-proxy` sends each category of outgoing traffic through the company's HTTP proxy or not: **registries** (artifacts, PyPI metadata — on by default), the **GitOps repository** and the **callbacks** to SilicaProxy (off by default: internal traffic). Hosts of `non-proxy-hosts` are always reached directly. A category in scope fails when the proxy is unreachable, it never silently goes direct; the JVM's `http.proxyHost` properties are ignored. No proxy authentication. The external scanners do not use it.
+
+Static entries (`packagebehaviorguardian.allowlist`, same fields plus `ecosystem`) still apply on restart, together with the GitOps ones — for development and tests.
 
 ---
 
@@ -133,7 +142,13 @@ Main properties, under `packagebehaviorguardian.*` — every other one is docume
 | `analysis.rule-set-version` | — | `2` (bump to re-analyze) |
 | `analysis.public-base-url` | `PACKAGEBEHAVIORGUARDIAN_PUBLIC_BASE_URL` | — |
 | `retention.days` / `analysis-audit-days` / `check-audit-days` | `PACKAGEBEHAVIORGUARDIAN_RETENTION_DAYS` / … | `90` / `365` / `365` |
-| `allowlist` | — | `[]` |
+| `gitops.enabled` / `repository-url` / `branch` / `path` | `PACKAGEBEHAVIORGUARDIAN_GITOPS_ENABLED` / `_REPOSITORY_URL` / `_BRANCH` / `_PATH` | `false` / — / remote HEAD / root |
+| `gitops.username` / `token` | `PACKAGEBEHAVIORGUARDIAN_GITOPS_USERNAME` / `_TOKEN` | `oauth2` / — (HTTPS token, never in the URL) |
+| `gitops.sync-interval-minutes` | `PACKAGEBEHAVIORGUARDIAN_GITOPS_SYNC_INTERVAL_MINUTES` | `10` |
+| `corporate-proxy.enabled` / `host` / `port` | `PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_ENABLED` / `_HOST` / `_PORT` | `false` / — / `8080` |
+| `corporate-proxy.non-proxy-hosts` | `PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_NON_PROXY_HOSTS` | `localhost\|127.0.0.1` (`\|`-separated, `*` wildcards) |
+| `corporate-proxy.scope.registries` / `git-repository` / `callbacks` | `PACKAGEBEHAVIORGUARDIAN_CORPORATE_PROXY_SCOPE_REGISTRIES` / `_GIT_REPOSITORY` / `_CALLBACKS` | `true` / `false` / `false` |
+| `allowlist` (static) | — | `[]` |
 
 ---
 
