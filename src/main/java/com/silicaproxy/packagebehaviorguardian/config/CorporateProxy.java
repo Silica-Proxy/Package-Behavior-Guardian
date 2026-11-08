@@ -61,6 +61,8 @@ public class CorporateProxy {
             LOG.info("Corporate proxy {}:{} (non-proxy hosts: {}) for registries: {}, Git repository: {}, callbacks: {}",
                     config.host(), config.port(), config.nonProxyHosts(), config.scope().registries(),
                     config.scope().gitRepository(), config.scope().callbacks());
+        } else {
+            LOG.info("Corporate proxy disabled: every outbound connection is direct");
         }
         this.registries = config.scope().registries() ? proxied : HttpClient.Builder.NO_PROXY;
         this.gitRepository = config.scope().gitRepository() ? proxied : HttpClient.Builder.NO_PROXY;

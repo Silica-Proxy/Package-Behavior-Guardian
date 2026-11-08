@@ -62,6 +62,15 @@ public class GitOpsAllowlistSync {
         this.repository = repository;
         this.store = store;
         this.meterRegistry = meterRegistry;
+        if (gitops.enabled()) {
+            String branch = gitops.branch();
+            LOG.info("GitOps allowlist enabled: {} (branch {}, directory /{}), synchronized every {} min",
+                    redact(String.valueOf(gitops.repositoryUrl())), branch == null || branch.isBlank() ? "remote HEAD" : branch,
+                    gitops.path(), gitops.syncIntervalMinutes());
+        } else {
+            LOG.info("GitOps allowlist disabled (packagebehaviorguardian.gitops.enabled=false): only the {} configured"
+                    + " entries apply", properties.allowlist().size());
+        }
     }
 
     @Scheduled(initialDelayString = "${packagebehaviorguardian.gitops.initial-delay-ms:5000}",
@@ -80,11 +89,15 @@ public class GitOpsAllowlistSync {
             Path root = gitops.effectiveCloneDir();
             AllowlistFiles.Result result = AllowlistFiles.read(root, root.resolve(gitops.path()).normalize());
             result.skipped().forEach(reason -> LOG.warn("GitOps allowlist: entry skipped, {}", LogSanitizer.sanitize(reason)));
-            long generation = repository.replace(result.entries(), revision, result.skipped().size());
-            LOG.info("GitOps allowlist synchronized: {} entries ({} skipped) from commit {}, generation {}",
-                    result.entries().size(), result.skipped().size(), revision, generation);
+            AllowlistRepository.Replaced replaced = repository.replace(result.entries(), revision, result.skipped().size());
             count(Metrics.OUTCOME_SUCCESS);
-            store.refresh();
+            if (replaced.changed()) {
+                LOG.info("GitOps allowlist synchronized: {} entries ({} skipped) from commit {}, generation {}",
+                        result.entries().size(), result.skipped().size(), revision, replaced.generation());
+                store.refresh();
+            } else {
+                LOG.debug("GitOps allowlist up to date at commit {} ({} entries)", revision, result.entries().size());
+            }
             return true;
         } catch (IOException | RuntimeException e) {
             String error = Texts.clip(redact(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));

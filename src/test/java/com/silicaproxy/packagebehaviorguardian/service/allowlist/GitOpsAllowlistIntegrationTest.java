@@ -180,6 +180,28 @@ class GitOpsAllowlistIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    void anUnchangedRepositoryDoesNotBumpTheGeneration() throws IOException, GitAPIException {
+        long generation = store.state().generation();
+        try (Git git = Git.open(REMOTE.toFile())) {
+            commit(git, "README.md", "a commit outside the allowlist files");
+        }
+
+        assertThat(sync.sync()).isTrue();
+        store.refresh();
+
+        assertThat(store.state().generation()).isEqualTo(generation);
+        assertThat(store.state().lastError()).isNull();
+        assertThat(monitoringService.gitopsHealth().status()).isEqualTo("UP");
+    }
+
+    @Test
+    void anEntryIsDescribedForTheLogs() {
+        assertThat(AllowlistStore.describe(new com.silicaproxy.packagebehaviorguardian.properties.PackageBehaviorGuardianProperties
+                .AllowlistEntry("npm", "esbuild", null, "GDG-RISK", "install hooks", "reviewed")))
+                .isEqualTo("npm/esbuild@* rule=GDG-RISK detail=\"install hooks\" reason=\"reviewed\"");
+    }
+
+    @Test
     void aRewrittenHistoryIsFollowed() throws IOException, GitAPIException {
         try (Git git = Git.open(REMOTE.toFile())) {
             commit(git, "pbg/maven.yaml", "allowlist:\n  - name: \"com.acme:tool\"\n    reason: reviewed\n");
