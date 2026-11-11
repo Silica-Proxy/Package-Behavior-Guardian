@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 RUN java -Djarmode=tools -jar /app/packagebehaviorguardian.jar extract --layers --destination /app/extracted
 
 # Stage 2: Minimal JRE with jlink (glibc, matches runtime base; the jdk-all variant ships the jmods jlink needs)
-FROM bellsoft/liberica-runtime-container:jdk-all-25-glibc@sha256:db01f3f335b528cfce7f9044a11bf7b5e85ee94ec3c7eb92b42a3628d1e97c83 AS jre-builder
+FROM bellsoft/liberica-runtime-container:jdk-all-27-glibc@sha256:0c38fded356cf4a8ca140df7819dbf98d5268c68ed302434e0075f0cf1e33db7 AS jre-builder
 COPY --link --from=builder /app/packagebehaviorguardian.jar /app/packagebehaviorguardian.jar
 RUN mkdir -p /tmp/app && \
     cd /tmp/app && \
