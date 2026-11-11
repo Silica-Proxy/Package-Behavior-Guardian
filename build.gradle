@@ -41,7 +41,7 @@ dependencies {
 
 	// Purges run on one instance at a time (Apache-2.0)
 	implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
-	implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+	implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.11.0'
 
 	// Static bytecode analysis of Maven jars (BSD-3-Clause)
 	implementation 'org.ow2.asm:asm:9.11.1'
