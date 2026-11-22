@@ -14,7 +14,7 @@
 #     /v/bin/pip-compile --generate-hashes --allow-unsafe --strip-extras --upgrade guarddog-build-requirements.in'
 # then check the diff and rebuild the image (docker build .).
 -c guarddog-requirements.txt
-pip==26.2.2
+pip==26.3
 setuptools
 wheel
 cffi
