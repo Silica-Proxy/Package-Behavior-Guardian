@@ -183,7 +183,7 @@ docker compose up -d     # PostgreSQL on localhost:5434
 ./gradlew check          # tests (Testcontainers), Checkstyle, PMD, SpotBugs, licenses
 ```
 
-Dependencies are pinned: Gradle verification metadata (regenerate with `./gradlew --write-verification-metadata sha256 check bootJar`), Docker images by digest, GuardDog by hash (`docker/guarddog-requirements.txt`).
+Dependencies are partly pinned: Docker images by digest, GuardDog by hash (`docker/guarddog-requirements.txt`). Gradle dependencies are not checksum-verified (no `gradle/verification-metadata.xml`).
 
 ## Known limits
 
