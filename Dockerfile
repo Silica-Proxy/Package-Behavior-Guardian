@@ -23,7 +23,7 @@ ARG SCANNER_SLOTS=64
 FROM ${MALCONTENT_IMAGE} AS malcontent
 
 # Stage 1: Build — bytecode is architecture-independent, so compile once on the native build platform
-FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk@sha256:83f4a7fc27df94dcc7b8de04d14cbbba8da14406f921e966969c3b09000aa507 AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk@sha256:ce2ef9d2d67a68de5e196d4de9d743327c44a10b57fe02ec39f572c652cacfd3 AS builder
 WORKDIR /app
 
 COPY gradle/ /app/gradle/
